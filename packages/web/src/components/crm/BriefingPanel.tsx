@@ -142,7 +142,7 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
   const memoryEntries = flattenBriefingEntries(briefing?.context_entries);
   const signalEntries = flattenBriefingEntries(briefing?.signals);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const productContext = (briefing as any)?.product_context as {
+  const knowledgeContext = (briefing as any)?.knowledge as {
     status?: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     relevant_claims?: any[]; avoid_claims?: any[]; warnings?: string[];
@@ -330,18 +330,18 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
           </BriefingSection>
         )}
 
-        {/* Knowledge claims (governed, optional) */}
-        {productContext?.status === 'available' && (productContext.relevant_claims?.length ?? 0) > 0 && (
+        {/* Trusted Facts (governed, optional) */}
+        {knowledgeContext?.status === 'available' && (knowledgeContext.relevant_claims?.length ?? 0) > 0 && (
           <BriefingSection
             icon={<FileText className="w-4 h-4 text-primary" />}
-            title="Knowledge Claims"
-            pill={productContext.relevant_claims?.length}
+            title="Trusted Facts"
+            pill={knowledgeContext.relevant_claims?.length}
             defaultOpen
           >
             <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">Approved, source-grounded claims safe to cite in customer-facing messages.</p>
+              <p className="text-xs text-muted-foreground">Approved, source-backed facts safe to cite in customer-facing messages.</p>
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {(productContext.relevant_claims ?? []).map((c: any) => (
+              {(knowledgeContext.relevant_claims ?? []).map((c: any) => (
                 <div key={c.id} className="rounded-lg border border-border p-3 space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     {c.knowledge_type && <span className="text-[10px] uppercase tracking-wide text-primary">{c.knowledge_type}</span>}
@@ -354,10 +354,10 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
                   )}
                 </div>
               ))}
-              {(productContext.avoid_claims?.length ?? 0) > 0 && (
-                <p className="text-xs text-warning">{productContext.avoid_claims?.length} claim(s) excluded as not customer-safe.</p>
+              {(knowledgeContext.avoid_claims?.length ?? 0) > 0 && (
+                <p className="text-xs text-warning">{knowledgeContext.avoid_claims?.length} fact(s) excluded as not customer-safe.</p>
               )}
-              {(productContext.warnings ?? []).map((w: string, i: number) => (
+              {(knowledgeContext.warnings ?? []).map((w: string, i: number) => (
                 <p key={i} className="text-xs text-warning">⚠ {w}</p>
               ))}
             </div>
@@ -566,26 +566,6 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
                   </div>
                 );
               })}
-            </div>
-          </BriefingSection>
-        )}
-
-        {/* Active Sequences */}
-        {briefing?.active_sequences?.length > 0 && (
-          <BriefingSection
-            icon={<Activity className="w-4 h-4 text-accent" />}
-            title="Active Sequences"
-            pill={briefing.active_sequences.length}
-            pillColor="#6366f1"
-          >
-            <div className="space-y-2">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {briefing.active_sequences.map((s: any) => (
-                <div key={s.enrollment_id} className="text-sm text-foreground">
-                  <span className="font-medium">{s.sequence_name}</span>
-                  {s.current_step != null && <span className="text-muted-foreground ml-1.5">Step {s.current_step}</span>}
-                </div>
-              ))}
             </div>
           </BriefingSection>
         )}

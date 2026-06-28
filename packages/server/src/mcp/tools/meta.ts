@@ -29,7 +29,7 @@ const opsStatusGet = z.object({
 const opsJobRecover = z.object({
   queue_name: z.enum([
     'context_outbox',
-    'raw_context_sources',
+    'sources',
     'agent_turns',
     'context_embedding_jobs',
     'mailbox_sync_jobs',
@@ -57,9 +57,9 @@ const opsDataQualityRepair = z.object({
     'activities_missing_canonical_subject',
     'current_context_missing_search_index',
     'stuck_context_outbox_processing',
-    'stale_raw_context_sources_processing',
-    'stuck_raw_context_extraction_attempts_running',
-    'failed_raw_context_sources_retryable',
+    'stale_sources_processing',
+    'stuck_source_extraction_attempts_running',
+    'failed_sources_retryable',
     'stuck_agent_turns_running',
   ]),
   dry_run: z.boolean().optional().default(true),
@@ -294,7 +294,7 @@ const QUEUE_SPECS: QueueSpec[] = [
     `,
   },
   {
-    name: 'raw_context_sources',
+    name: 'sources',
     pendingStatuses: ['pending', 'processing', 'failed'],
     countSql: `
       SELECT status, count(*)::int AS count, min(created_at) AS oldest_created_at
@@ -598,7 +598,7 @@ export function metaTools(db: DbPool): ToolDef[] {
     {
       name: 'ops_data_quality_get',
       tier: 'admin',
-      description: 'Run tenant-scoped data-quality checks for invalid lifecycle/stage values, missing canonical activity subjects, orphaned actor links, missing search-index rows for current context, stuck context indexing work, stale Raw Context processing receipts, and stuck Raw Context extraction attempts. Use this before enterprise rollout, after migrations, and during incident triage to catch data drift that would make agents reason over stale or malformed customer state.',
+      description: 'Run tenant-scoped data-quality checks for invalid lifecycle/stage values, missing canonical activity subjects, orphaned actor links, missing search-index rows for current context, stuck context indexing work, stale Source processing receipts, and stuck Source extraction attempts. Use this before enterprise rollout, after migrations, and during incident triage to catch data drift that would make agents reason over stale or malformed customer state.',
       inputSchema: opsDataQualityGet,
       handler: async (input: z.infer<typeof opsDataQualityGet>, actor: ActorContext) => {
         const report = await getDataQualityReport(db, actor.tenant_id, input.sample_limit);
@@ -611,7 +611,7 @@ export function metaTools(db: DbPool): ToolDef[] {
     {
       name: 'ops_data_quality_repair',
       tier: 'admin',
-      description: 'Repair safe tenant-scoped data-quality findings. Supports dry-run-first canonical activity subject backfill, current-context search-index backfill enqueueing, retrying stuck context outbox jobs, requeueing stale or retryable Raw Context processing receipts, and failing/requeueing stuck Raw Context extraction attempts. Higher-risk findings remain report-only and require operator review. Admin/owner only.',
+      description: 'Repair safe tenant-scoped data-quality findings. Supports dry-run-first canonical activity subject backfill, current-context search-index backfill enqueueing, retrying stuck context outbox jobs, requeueing stale or retryable Source processing receipts, and failing/requeueing stuck Source extraction attempts. Higher-risk findings remain report-only and require operator review. Admin/owner only.',
       inputSchema: opsDataQualityRepair,
       handler: async (input: z.infer<typeof opsDataQualityRepair>, actor: ActorContext) => {
         return runToolOperation(db, actor, 'ops_data_quality_repair', input, async () => {

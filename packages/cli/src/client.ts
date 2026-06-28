@@ -221,8 +221,8 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   context_add: { method: 'POST', path: () => '/api/v1/context' },
   context_get: { method: 'GET', path: (i) => `/api/v1/context/${i.id}` },
   context_list: { method: 'GET', path: (i) => `/api/v1/context?limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}${i.memory_status ? `&memory_status=${i.memory_status}` : ''}${i.is_current !== undefined ? `&is_current=${i.is_current}` : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
-  context_raw_source_list: { method: 'GET', path: (i) => `/api/v1/context/raw-sources?limit=${i.limit ?? 50}${i.source_type ? `&source_type=${i.source_type}` : ''}${i.status ? `&status=${i.status}` : ''}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
-  context_raw_source_get: { method: 'GET', path: (i) => `/api/v1/context/raw-sources/${i.id}` },
+  context_source_list: { method: 'GET', path: (i) => `/api/v1/context/sources?limit=${i.limit ?? 50}${i.source_type ? `&source_type=${i.source_type}` : ''}${i.status ? `&status=${i.status}` : ''}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
+  context_source_get: { method: 'GET', path: (i) => `/api/v1/context/sources/${i.id}` },
   context_signal_promote: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/promote` },
   context_signal_reject: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/reject` },
   context_signal_group_list: { method: 'GET', path: (i) => `/api/v1/context/signal-groups?limit=${i.limit ?? 20}${i.status ? `&status=${i.status}` : ''}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}${i.attention_only ? '&attention_only=true' : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
@@ -241,10 +241,10 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
     subject_id: i.subject_id,
     context_entry_id: i.context_entry_id,
     signal_group_id: i.signal_group_id,
-    raw_context_source_id: i.raw_context_source_id,
+    source_id: i.source_id,
   }).filter(([, value]) => Boolean(value)) as [string, string][]).toString()}` },
   context_semantic_search: { method: 'GET', path: (i) => `/api/v1/context/semantic-search?q=${encodeURIComponent((i.query as string) ?? '')}&limit=${i.limit ?? 10}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}` },
-	  context_raw_source_reprocess: { method: 'POST', path: (i) => `/api/v1/context/raw-sources/${i.id}/reprocess` },
+	  context_source_reprocess: { method: 'POST', path: (i) => `/api/v1/context/sources/${i.id}/reprocess` },
 
 	  // Action Context
 	  action_context_get: { method: 'POST', path: () => '/api/v1/action-context' },

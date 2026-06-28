@@ -31,7 +31,7 @@ export function contextSourceDropTools(db: DbPool): ToolDef[] {
     {
       name: 'context_source_connection_list',
       tier: 'admin',
-      description: 'List admin-managed transcript and raw-note storage drops. These sources discover S3/local files, then feed matching transcript artifacts into Customer Activity, Raw Context, Signals, and Memory.',
+      description: 'List admin-managed transcript and raw-note storage drops. These sources discover S3/local files, then feed matching transcript artifacts into Customer Activity, Sources, Signals, and Memory.',
       inputSchema: z.object({}),
       handler: async (_input: {}, actor: ActorContext) => listContextSourceConnections(db, actor),
     },
@@ -111,7 +111,7 @@ export function contextSourceDropTools(db: DbPool): ToolDef[] {
     {
       name: 'context_source_object_get',
       tier: 'extended',
-      description: 'Inspect one transcript/raw-note source object, including file metadata, match reason, candidates, linked meeting/activity/raw context, and extraction receipt.',
+      description: 'Inspect one transcript/raw-note source object, including file metadata, match reason, candidates, linked meeting/activity/source receipt, and extraction receipt.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input, actor: ActorContext) => getContextSourceObject(db, actor, input.id),
     },

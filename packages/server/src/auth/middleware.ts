@@ -23,6 +23,45 @@ function cookieValue(header: string | undefined, name: string): string | undefin
   return undefined;
 }
 
+function isUnsafeMethod(method: string): boolean {
+  return !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase());
+}
+
+function expectedOrigin(req: Request): string {
+  const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim()
+    || req.protocol
+    || 'http';
+  return `${proto}://${req.get('host')}`;
+}
+
+function requestOrigin(req: Request): string | undefined {
+  const origin = req.get('origin');
+  if (origin) return origin;
+  const referer = req.get('referer');
+  if (!referer) return undefined;
+  try {
+    const url = new URL(referer);
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function cookieRequestHasTrustedOrigin(req: Request): boolean {
+  const actual = requestOrigin(req);
+  if (!actual) return false;
+  const allowed = new Set([expectedOrigin(req)]);
+  const publicUrl = process.env.CRMY_PUBLIC_URL;
+  if (publicUrl) {
+    try {
+      allowed.add(new URL(publicUrl).origin);
+    } catch {
+      // Ignore malformed deployment metadata and fall back to request host.
+    }
+  }
+  return allowed.has(actual);
+}
+
 declare global {
   namespace Express {
     interface Request {
@@ -50,6 +89,15 @@ export function authMiddleware(db: DbPool, jwtSecret: string) {
     }
 
     const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : cookieToken ?? '';
+    if (cookieToken && !authHeader?.startsWith('Bearer ') && isUnsafeMethod(req.method) && !cookieRequestHasTrustedOrigin(req)) {
+      res.status(403).json({
+        type: 'https://crmy.ai/errors/csrf_protection',
+        title: 'CSRF Protection',
+        status: 403,
+        detail: 'Cookie-authenticated requests that change data must come from the CRMy origin.',
+      });
+      return;
+    }
 
     // Try JWT first
     if (!token.startsWith('crmy_')) {

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Governed Product Knowledge — Phase 7: governance.
+ * Trusted Facts — Phase 7: governance.
  *
- * Three governance capabilities over claim envelopes, all optional and additive:
+ * Three governance capabilities over source-backed facts, all optional and additive:
  *
  *   1. Admin review flow (`reviewKnowledgeClaim`, `listKnowledgeClaimsForReview`):
  *      approve / reject / deprecate / mark-stale / reactivate a claim, set its
@@ -13,7 +13,7 @@
  *
  *   2. Conflict detection with source-priority resolution
  *      (`detectKnowledgeConflicts`): finds live claims in the same category that
- *      cover the same competitor/scope and may state competing product truth,
+ *      cover the same competitor/scope and may state competing customer-facing guidance,
  *      and recommends which should win — an authoritative source over a
  *      secondary one, an approved claim over an unapproved one — or manual
  *      review when neither rule decides. Pure classification (`classifyConflict`)
@@ -21,8 +21,8 @@
  *
  *   3. Stale review assignments (`processKnowledgeReviews`): for claims that have
  *      a review owner and need attention, open a review assignment for that
- *      owner — mirroring the customer-Memory staleness sweep so aging product
- *      truth is actively refreshed rather than silently decaying.
+ *      owner — mirroring the customer-Memory staleness sweep so aging claims
+ *      are actively refreshed rather than silently decaying.
  *
  * See docs/governed-product-knowledge-retrieval.md (Phase 7).
  */
@@ -98,7 +98,7 @@ export interface ListKnowledgeClaimsInput {
   limit?: number;
 }
 
-/** List claim envelopes for the admin governance/review queue. */
+/** List Trusted Facts for the admin governance/review queue. */
 export async function listKnowledgeClaimsForReview(
   db: DbPool,
   actor: ActorContext,
@@ -175,7 +175,7 @@ export function reviewDecisionToPatch(
   return patch;
 }
 
-/** Apply an admin review decision to a claim envelope. Returns the updated record. */
+/** Apply an admin review decision to a Trusted Fact. Returns the updated record. */
 export async function reviewKnowledgeClaim(
   db: DbPool,
   actor: ActorContext,
@@ -275,7 +275,7 @@ export interface DetectKnowledgeConflictsInput {
 }
 
 /**
- * Detect competing knowledge claims for a tenant. With `apply`, the lower-priority
+ * Detect competing Trusted Facts for a tenant. With `apply`, the lower-priority
  * (or unapproved) claim of each *resolvable* conflict is marked `conflicting` so
  * it stops flowing into customer-facing retrieval until reviewed.
  */
@@ -337,7 +337,7 @@ export async function detectKnowledgeConflicts(
 
 function reviewReason(claim: { status: string; approval_status: string }): string {
   if (claim.status === 'stale') return 'reached its freshness window and needs re-verification';
-  if (claim.status === 'conflicting') return 'was flagged as conflicting with another knowledge claim';
+  if (claim.status === 'conflicting') return 'was flagged as conflicting with another Trusted Fact';
   if (claim.approval_status === 'pending') return 'is pending approval before customer-facing use';
   return 'needs review before customer-facing use';
 }
@@ -352,8 +352,8 @@ export async function processKnowledgeReviewsForTenant(
   let created = 0;
   for (const claim of claims) {
     await createAssignment(db, tenantId, {
-      title: `Review knowledge claim: ${claim.category}`,
-      description: `The knowledge claim "${claim.title}" ${reviewReason(claim)}.`,
+      title: `Review Trusted Fact: ${claim.category}`,
+      description: `The Trusted Fact "${claim.title}" ${reviewReason(claim)}.`,
       assignment_type: 'knowledge_claim_review',
       assigned_by: claim.created_by ?? claim.review_owner_id,
       assigned_to: claim.review_owner_id,
@@ -366,7 +366,7 @@ export async function processKnowledgeReviewsForTenant(
 }
 
 /**
- * Background sweep: open review assignments for owned knowledge claims that are
+ * Background sweep: open review assignments for owned Trusted Facts that are
  * stale, conflicting, or pending approval. Best-effort and non-blocking.
  */
 export async function processKnowledgeReviews(db: DbPool, limit = 20): Promise<void> {

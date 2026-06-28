@@ -243,7 +243,7 @@ export function activityTools(db: DbPool): ToolDef[] {
     {
       name: 'activity_add_context',
       tier: 'extended',
-      description: 'Add debrief notes, a transcript, or a meeting summary to an existing activity and immediately process it as Raw Context. Use this for phone calls, in-person meetings, or calendar meetings that are missing notes.',
+      description: 'Add debrief notes, a transcript, or a meeting summary to an existing activity and immediately process it as a Source. Use this for phone calls, in-person meetings, or calendar meetings that are missing notes.',
       inputSchema: z.object({
         id: z.string().uuid(),
         text: z.string().min(1),

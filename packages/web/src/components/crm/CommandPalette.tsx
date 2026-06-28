@@ -7,14 +7,14 @@ import { Command } from 'cmdk';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users, Briefcase, LayoutDashboard, FolderKanban, Activity, Settings, Search,
-  Building2, BookOpen, ClipboardList, Zap, ListOrdered, Plus, Database, Bot, Mail,
+  Building2, BookOpen, ClipboardList, Plus, Database, Bot, Mail,
   ScrollText, ShieldCheck, Network, KeyRound, Tags, Palette,
   Webhook, Sparkles, Loader2, FileText, Server, type LucideIcon,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { getUser } from '@/api/client';
 import { cn, formatCompactCurrency } from '@/lib/utils';
-import { useSearch, useWorkflows, useSequences } from '@/api/hooks';
+import { useSearch } from '@/api/hooks';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { ENTITY_COLORS } from '@/lib/entityColors';
 
@@ -46,7 +46,7 @@ const DESTINATIONS: DestinationCommand[] = [
   { label: 'Signals',         icon: Sparkles,        path: '/context?tab=signals',      color: ENTITY_COLORS.context, keywords: 'signals inferred context review promote dismiss evidence confidence' },
   { label: 'Memory',          icon: FileText,        path: '/context?tab=browser',      color: ENTITY_COLORS.context, keywords: 'memory confirmed context operational knowledge evidence' },
   { label: 'Context Connectors', icon: Activity,      path: '/context?tab=connectors',   color: ENTITY_COLORS.context, keywords: 'connectors sources email activity meetings calls mailbox calendar mcp api add context' },
-  { label: 'Knowledge',        icon: BookOpen,        path: '/knowledge',                color: ENTITY_COLORS.knowledge, keywords: 'knowledge claims company product competitor approved grounded cite claims briefing drafts', roles: ['admin', 'owner'] },
+  { label: 'Knowledge',        icon: BookOpen,        path: '/knowledge',                color: ENTITY_COLORS.knowledge, keywords: 'knowledge trusted facts company product competitor approved grounded cite briefing drafts', roles: ['admin', 'owner'] },
   { label: 'Memory Health',   icon: ShieldCheck,     path: '/?tab=health',              color: ENTITY_COLORS.context, keywords: 'memory health review contradictions context quality', roles: ['admin', 'owner'] },
   { label: 'Context Graph',   icon: Network,         path: '/context?tab=graph',        color: ENTITY_COLORS.context, keywords: 'graph context memory relationships briefing network' },
   { label: 'Memory Lineage',  icon: Network,         path: '/context?tab=lineage',      color: ENTITY_COLORS.context, keywords: 'lineage evidence sources signals memory handoffs writebacks audit' },
@@ -58,9 +58,7 @@ const DESTINATIONS: DestinationCommand[] = [
   { label: 'Use Cases',       icon: FolderKanban,    path: '/use-cases',                color: ENTITY_COLORS.useCases, keywords: 'deployments products use cases outcomes' },
   { label: 'Customer Activity Source', icon: Activity, path: '/activities',             color: ENTITY_COLORS.activities, keywords: 'calls notes meetings timeline activities calendar context source' },
   { label: 'Customer Email Source', icon: Mail,       path: '/emails',                  color: ENTITY_COLORS.emails, keywords: 'email inbox outbound inbound drafts approvals mailbox context source' },
-  { label: 'Automation Settings', icon: Zap,          path: '/settings/advanced',       color: ENTITY_COLORS.workflows, keywords: 'automations advanced triggers workflows sequences webhooks', roles: ['admin', 'owner'] },
-  { label: 'Action Rules',     icon: Zap,             path: '/automations?tab=triggers', color: ENTITY_COLORS.workflows, keywords: 'workflows triggers automations action rules event rules', roles: ['admin', 'owner'] },
-  { label: 'Sequences',        icon: ListOrdered,     path: '/automations?tab=sequences', color: ENTITY_COLORS.sequences, keywords: 'email sequences automations enrollment advanced', roles: ['admin', 'owner'] },
+  { label: 'Advanced Settings', icon: Settings,       path: '/settings/advanced',       color: null, keywords: 'advanced experimental event bus webhooks', roles: ['admin', 'owner'] },
   { label: 'Handoffs',        icon: ClipboardList,   path: '/handoffs',                 color: ENTITY_COLORS.assignments, keywords: 'hitl approvals inbox assignments handoffs human review' },
   { label: 'Reliability',     icon: Database,        path: '/operations',               color: ENTITY_COLORS.operations, keywords: 'operations reliability health data quality system status', roles: ['admin', 'owner'] },
   { label: 'Audit Log',       icon: ScrollText,      path: '/audit-log',                color: ENTITY_COLORS.auditLog, keywords: 'audit events history trail changes', roles: ['admin', 'owner'] },
@@ -69,7 +67,7 @@ const DESTINATIONS: DestinationCommand[] = [
   { label: 'Database Settings', icon: Database,      path: '/settings/database',        color: ENTITY_COLORS.operations, keywords: 'database postgres neon supabase rds lakebase pgvector sample data', roles: ['admin', 'owner'] },
   { label: 'Model Settings',  icon: Sparkles,        path: '/settings/model',           color: ENTITY_COLORS.agents, keywords: 'model local workspace agent llm openai anthropic azure gemini bedrock mistral litellm openrouter ollama databricks nvidia backup provider', roles: ['admin', 'owner'] },
   { label: 'Systems of Record', icon: Server,        path: '/settings/systems',         color: ENTITY_COLORS.operations, keywords: 'systems of record hubspot salesforce snowflake databricks connectors sync mappings writebacks external systems', roles: ['admin', 'owner'] },
-  { label: 'Knowledge Sources', icon: BookOpen,      path: '/settings/knowledge-sources', color: ENTITY_COLORS.knowledge, keywords: 'knowledge sources mcp connectors snippets setup', roles: ['admin', 'owner'] },
+  { label: 'Knowledge Sources', icon: BookOpen,      path: '/settings/knowledge-sources', color: ENTITY_COLORS.knowledge, keywords: 'knowledge sources mcp connectors trusted facts setup', roles: ['admin', 'owner'] },
   { label: 'Appearance',      icon: Palette,         path: '/settings/appearance',      color: null, keywords: 'appearance theme charcoal color display' },
   { label: 'API Keys',        icon: KeyRound,        path: '/settings/api-keys',        color: null, keywords: 'api keys tokens access' },
   { label: 'Webhooks',        icon: Webhook,         path: '/settings/webhooks',        color: null, keywords: 'webhooks integrations outbound events advanced', roles: ['admin', 'owner'] },
@@ -118,7 +116,7 @@ function useCaseName(u: any) {
 }
 
 export function CommandPalette() {
-  const { commandPaletteOpen, setCommandPaletteOpen, openDrawer, openWorkflowEditor, openSequenceEditor, openQuickAdd } = useAppStore();
+  const { commandPaletteOpen, setCommandPaletteOpen, openDrawer, openQuickAdd } = useAppStore();
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
@@ -146,24 +144,6 @@ export function CommandPalette() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const contextEntries: any[] = searchResults?.contextEntries ?? [];
 
-  // Automations data for search-through
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: wfData } = useWorkflows({ limit: 100 }, { enabled: isAdmin }) as any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: seqData } = useSequences({ limit: 100 }, { enabled: isAdmin }) as any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const allWorkflows: any[] = wfData?.data ?? wfData?.workflows ?? [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const allSequences: any[] = seqData?.data ?? seqData?.sequences ?? [];
-
-  // Filter automations by query when searching
-  const matchedWorkflows = query
-    ? allWorkflows.filter((w: any) => includesQuery(normalizedQuery, w.name, w.description, w.trigger_event)).slice(0, 5)
-    : [];
-  const matchedSequences = query
-    ? allSequences.filter((s: any) => includesQuery(normalizedQuery, s.name, s.description, s.ai_persona)).slice(0, 5)
-    : [];
-
   const actions: ActionCommand[] = useMemo(() => [
     { label: 'New Contact',     icon: Plus, color: ENTITY_COLORS.contacts,      keywords: 'create add person lead contact', run: () => openQuickAdd('contact') },
     { label: 'New Account',     icon: Plus, color: ENTITY_COLORS.accounts,      keywords: 'create add account company organization', run: () => openQuickAdd('account') },
@@ -171,9 +151,7 @@ export function CommandPalette() {
     { label: 'New Use Case',    icon: Plus, color: ENTITY_COLORS.useCases,      keywords: 'create add use case deployment', run: () => openQuickAdd('use-case') },
     { label: 'Log Activity',    icon: Plus, color: ENTITY_COLORS.activities,    keywords: 'create add log call note meeting activity', run: () => openQuickAdd('activity') },
     { label: 'New Handoff',     icon: Plus, color: ENTITY_COLORS.assignments,   keywords: 'create add handoff task assignment', run: () => openQuickAdd('assignment') },
-    { label: 'New Action Rule', icon: Plus, color: ENTITY_COLORS.workflows,     keywords: 'create add trigger workflow automation action rule event rule advanced', roles: ['admin', 'owner'], run: () => { navigate('/automations?tab=triggers'); openWorkflowEditor(null); } },
-    { label: 'New Sequence',    icon: Plus, color: ENTITY_COLORS.sequences,     keywords: 'create add sequence email automation advanced', roles: ['admin', 'owner'], run: () => { navigate('/automations?tab=sequences'); openSequenceEditor(null); } },
-  ], [navigate, openQuickAdd, openWorkflowEditor, openSequenceEditor]);
+  ], [openQuickAdd]);
 
   const matchedDestinations = useMemo(() => {
     const results = DESTINATIONS
@@ -397,39 +375,6 @@ export function CommandPalette() {
           </Command.Group>
         )}
 
-        {matchedWorkflows.length > 0 && (
-          <Command.Group heading="Triggers" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
-            {matchedWorkflows.map((w: any) => (
-              <Command.Item
-                key={w.id as string}
-                value={`trigger workflow ${w.name}`}
-                onSelect={() => runAction(() => { navigate('/automations'); openWorkflowEditor(w.id as string); })}
-                className={itemClass}
-              >
-                <Zap className={cn('w-4 h-4', ENTITY_COLORS.workflows.text)} />
-                <span>{w.name as string}</span>
-                {!w.is_active && <span className="text-muted-foreground text-xs ml-auto">Paused</span>}
-              </Command.Item>
-            ))}
-          </Command.Group>
-        )}
-
-        {matchedSequences.length > 0 && (
-          <Command.Group heading="Sequences" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
-            {matchedSequences.map((s: any) => (
-              <Command.Item
-                key={s.id as string}
-                value={`sequence email ${s.name}`}
-                onSelect={() => runAction(() => { navigate('/automations'); openSequenceEditor(s.id as string); })}
-                className={itemClass}
-              >
-                <ListOrdered className={cn('w-4 h-4', ENTITY_COLORS.sequences.text)} />
-                <span>{s.name as string}</span>
-                {!s.is_active && <span className="text-muted-foreground text-xs ml-auto">Paused</span>}
-              </Command.Item>
-            ))}
-          </Command.Group>
-        )}
       </Command.List>
       {!isMobile && (
         <div className="flex items-center justify-between px-4 py-2 border-t border-border text-xs text-muted-foreground">

@@ -116,7 +116,7 @@ async function assertRawContextSourceAccess(
       source.actor_id !== actor.actor_id &&
       source.actor_id !== requesterActorRecordId
     ) {
-      throw notFound('RawContextSource', sourceIdForError);
+      throw notFound('Source', sourceIdForError);
     }
     return;
   }
@@ -137,10 +137,10 @@ async function assertLineageAccess(db: DbPool, actor: ActorContext, input: z.inf
     if (!group) throw notFound('Signal', input.signal_group_id);
     await assertSubjectAccess(db, actor, group.subject_type as SubjectType, group.subject_id);
   }
-  if (input.raw_context_source_id) {
-    const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.raw_context_source_id);
-    if (!source) throw notFound('RawContextSource', input.raw_context_source_id);
-    await assertRawContextSourceAccess(db, actor, source, input.raw_context_source_id);
+  if (input.source_id) {
+    const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.source_id);
+    if (!source) throw notFound('Source', input.source_id);
+    await assertRawContextSourceAccess(db, actor, source, input.source_id);
   }
 }
 
@@ -163,7 +163,7 @@ function processingReceipt(source: rawContextRepo.RawContextSource | null, fallb
   skipped: number;
 }) {
   const receipt = {
-    raw_context_source_id: source?.id,
+    source_id: source?.id,
     status: source?.status ?? 'processed',
     stage: source?.stage ?? 'extracted',
     memory_created: source?.memory_created ?? fallback.memory_created,
@@ -247,7 +247,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_add',
       tier: 'core',
-      description: 'Advanced direct write for Current Memory or an already-reviewed Signal. Do not use this for raw transcripts, emails, notes, research, or other messy customer input; use context_ingest_auto or context_ingest so CRMy records Raw Context, extracts evidence-backed Signals, and promotes high-confidence Memory. Use memory_status="active" only for Current Memory that agents can rely on. Use memory_status="signal" only when you already have evidence and the entry needs review before writeback, forecast influence, task assignment, or customer engagement. Before creating Current Memory, CRMy checks existing Current Memory on the same subject and type; likely duplicates, updates, or contradictions are rejected with suggested actions so agents can use context_supersede or request review instead of creating noisy memory. Set confidence (0.0–1.0), evidence for signals, and valid_until whenever the information has a shelf life.',
+      description: 'Advanced direct write for Current Memory or an already-reviewed Signal. Do not use this for transcripts, emails, notes, research, or other messy customer input; use context_ingest_auto or context_ingest so CRMy records a Source, extracts evidence-backed Signals, and promotes high-confidence Memory. Use memory_status="active" only for Current Memory that agents can rely on. Use memory_status="signal" only when you already have evidence and the entry needs review before writeback, forecast influence, task assignment, or customer engagement. Before creating Current Memory, CRMy checks existing Current Memory on the same subject and type; likely duplicates, updates, or contradictions are rejected with suggested actions so agents can use context_supersede or request review instead of creating noisy memory. Set confidence (0.0-1.0), evidence for signals, and valid_until whenever the information has a shelf life.',
       inputSchema: contextEntryCreate,
       handler: async (input: z.infer<typeof contextEntryCreate>, actor: ActorContext) => {
         return runIdempotent(db, {
@@ -524,9 +524,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       },
     },
     {
-      name: 'context_raw_source_list',
+      name: 'context_source_list',
       tier: 'core',
-      description: 'List Raw Context processing records. Use this to see where context came from, whether source material was processed, how many Signals or Memory entries it produced, and what failed or needs review. This is the best tool for agents and operators to inspect ingestion receipts before deciding whether to retry, review Signals, or rely on confirmed Memory.',
+      description: 'List Source processing records. Use this to see where context came from, whether source material was processed, how many Signals or Memory entries it produced, and what failed or needs review. This is the best tool for agents and operators to inspect ingestion receipts before deciding whether to retry, review Signals, or rely on confirmed Memory.',
       inputSchema: z.object({
         source_type: z.string().optional().describe('Filter by source type such as activity, add_context, email_inbound, mcp, context_api, crm_sync, or warehouse_sync'),
         status: z.enum(['pending', 'processing', 'processed', 'needs_review', 'failed', 'skipped']).optional(),
@@ -564,41 +564,41 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           limit: input.limit ?? 50,
           cursor: input.cursor,
         });
-        return { raw_context_sources: result.data, next_cursor: result.next_cursor, total: result.total };
+        return { sources: result.data, next_cursor: result.next_cursor, total: result.total };
       },
     },
     {
-      name: 'context_raw_source_get',
+      name: 'context_source_get',
       tier: 'core',
-      description: 'Get a Raw Context processing record by ID, including source label, source type, status, processing stage, excerpt, counts, failure reason, and metadata. Use this when a processing receipt or Raw Context list item needs inspection.',
+      description: 'Get a Source processing record by ID, including source label, source type, status, processing stage, excerpt, counts, failure reason, and metadata. Use this when a processing receipt or Source list item needs inspection.',
       inputSchema: z.object({
-        id: z.string().uuid().describe('Raw Context source ID'),
+        id: z.string().uuid().describe('Source ID'),
       }),
       handler: async (input: { id: string }, actor: ActorContext) => {
         const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
-        if (!source) throw notFound('RawContextSource', input.id);
+        if (!source) throw notFound('Source', input.id);
         await assertRawContextSourceAccess(db, actor, source, input.id);
-        return { raw_context_source: source };
+        return { source };
       },
     },
     {
-      name: 'context_raw_source_reprocess',
+      name: 'context_source_reprocess',
       tier: 'core',
-      description: 'Retry a failed or skipped Raw Context processing record. If the source points at an activity, CRMy reruns extraction on that activity. If CRMy retained the original payload, it reruns automatic subject matching and extraction from the full source text. Only falls back to the excerpt when no replayable payload is available.',
+      description: 'Retry a failed or skipped Source processing record. If the source points at an activity, CRMy reruns extraction on that activity. If CRMy retained the original payload, it reruns automatic subject matching and extraction from the full source text. Only falls back to the excerpt when no replayable payload is available.',
       inputSchema: z.object({
-        id: z.string().uuid().describe('Raw Context source ID to reprocess'),
+        id: z.string().uuid().describe('Source ID to reprocess'),
         idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
         return runIdempotent(db, {
           tenantId: actor.tenant_id,
           actorId: actor.actor_id,
-          operation: 'context_raw_source_reprocess',
+          operation: 'context_source_reprocess',
           key: input.idempotency_key,
           request: input,
         }, async () => {
         const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
-        if (!source) throw notFound('RawContextSource', input.id);
+        if (!source) throw notFound('Source', input.id);
         await assertRawContextSourceAccess(db, actor, source, input.id);
         const actorRecordId = await ensureActorRecordForContext(db, actor);
 
@@ -618,7 +618,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           && (source.source_type === 'activity' || source.source_type === 'add_context' || source.source_type === 'mcp' || source.source_type.includes('email'));
         const payload = await rawContextPayloadRepo.getRawContextSourcePayload(db, actor.tenant_id, source.id);
         const replayDocument = payload?.document_text ?? source.raw_excerpt ?? '';
-        const replaySourceLabel = payload?.source_label ?? source.source_label ?? 'Reprocessed Raw Context';
+        const replaySourceLabel = payload?.source_label ?? source.source_label ?? 'Reprocessed Source';
         const replayOccurredAt = payload?.source_occurred_at ?? metadataString(source, 'source_occurred_at');
         const replayDocumentHash = payload?.document_hash ?? metadataString(source, 'source_document_hash')
           ?? (replayDocument ? createHash('sha256').update(replayDocument).digest('hex') : null);
@@ -663,7 +663,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
                   subject_type: subject.type as SubjectType,
                   subject_id: subject.id,
                   performed_by: actorRecordId,
-                  source_agent: actor.actor_type === 'agent' ? 'context_raw_source_reprocess' : undefined,
+                  source_agent: actor.actor_type === 'agent' ? 'context_source_reprocess' : undefined,
                   occurred_at: replayOccurredAt ?? new Date().toISOString(),
                   detail: {
                     raw_context_source_ref: source.source_ref,
@@ -702,11 +702,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               result = { extracted_count: extractedCount, memory_created: memoryCreated, signals_created: signalsCreated, skipped: skippedCount };
             }
           } else {
-            throw validationError('This Raw Context source cannot be reprocessed because CRMy does not have the original activity, replay payload, or source excerpt.');
+            throw validationError('This Source cannot be reprocessed because CRMy does not have the original activity, replay payload, or source excerpt.');
           }
 
           const updated = await rawContextRepo.getRawContextSource(db, actor.tenant_id, source.id);
-          return { raw_context_source: updated, result };
+          return { source: updated, result };
         } catch (err) {
           await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
             status: 'failed',
@@ -869,7 +869,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_lineage_get',
       tier: 'core',
-      description: 'Read the lineage behind Raw Context, Signals, Memory, Handoffs, writebacks, and audit events for a customer record or context artifact.',
+      description: 'Read the lineage behind Sources, Signals, Memory, Handoffs, writebacks, and audit events for a customer record or context artifact.',
       inputSchema: contextLineageGet,
       handler: async (input: z.infer<typeof contextLineageGet>, actor: ActorContext) => {
         await assertLineageAccess(db, actor, input);
@@ -1202,7 +1202,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             token_budget: input.token_budget,
             token_budget_profile: input.token_budget_profile,
             evidence_mode: input.evidence_mode,
-            include_product_context: input.include_product_context,
+            include_knowledge: input.include_knowledge,
             actor_id: actor.actor_id,
           },
         );
@@ -1246,7 +1246,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_ingest',
       tier: 'core',
-      description: 'Ingest Raw Context (transcript, email, meeting notes, etc.) and auto-extract structured Signals from it. Creates an activity as provenance, records a Raw Context processing receipt, and runs the extraction pipeline. Signals are evidence-backed but unconfirmed until promoted to Memory.',
+      description: 'Ingest a Source (transcript, email, meeting notes, etc.) and auto-extract structured Signals from it. Creates an activity as provenance, records a Source processing receipt, and runs the extraction pipeline. Signals are evidence-backed but unconfirmed until promoted to Memory.',
       inputSchema: contextIngest,
       handler: async (input: z.infer<typeof contextIngest>, actor: ActorContext) => {
         return runIdempotent(db, {
@@ -1309,7 +1309,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           memory_entries: memoryEntries,
           context_entries: [...memoryEntries, ...signals],
           activity_id: activity.id,
-          raw_context_source: rawSource ?? undefined,
+          source: rawSource ?? undefined,
           processing_receipt: receipt,
           mutation: mutationReceipt(actor, {
             objectType: 'activity',
@@ -1323,7 +1323,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_ingest_auto',
       tier: 'core',
-      description: 'Ingest a document (transcript, email, meeting notes, etc.) and automatically resolve which contacts and accounts are mentioned — no subject IDs required. Requires the configured Workspace Agent: the model identifies likely customer people/companies and useful hints, then CRMy grounds those candidates against actual contacts/accounts using entity resolution before extraction. Runs the full Raw Context → Signals → Memory pipeline for every resolved subject above the confidence threshold. Returns resolved subjects, entries created, and any names that could not be resolved. Ideal for agents processing inbound content when they do not know which customer records are involved.',
+      description: 'Ingest a document (transcript, email, meeting notes, etc.) and automatically resolve which contacts and accounts are mentioned. Requires the configured Workspace Agent: the model identifies likely customer people/companies and useful hints, then CRMy grounds those candidates against actual contacts/accounts using entity resolution before extraction. Runs the full Sources -> Signals -> Memory pipeline for every resolved subject above the confidence threshold. Returns resolved subjects, entries created, and any names that could not be resolved. Ideal for agents processing inbound content when they do not know which customer records are involved.',
       inputSchema: z.object({
         document: z.string().min(1).describe('The full text to ingest — transcript, email body, meeting notes, research, etc.'),
         source_label: z.string().optional().describe('Human-readable label for the source (e.g. "Discovery call 2026-04-09")'),
@@ -1340,7 +1340,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           record_type: z.enum(['contact', 'account', 'opportunity', 'use_case']),
           name: z.string(),
           confidence: z.number().min(0).max(1).default(0.5),
-          reason: z.string().optional().default('Extracted from Raw Context.'),
+          reason: z.string().optional().default('Extracted from Source.'),
           fields: z.record(z.string(), z.unknown()).default({}),
           duplicate_candidates: z.array(z.object({
             record_type: z.string(),
@@ -1408,9 +1408,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             memory_created: Number(existingSource.memory_created ?? 0),
             signals_created: Number(existingSource.signals_created ?? 0),
             skipped: Number(existingSource.skipped ?? 0),
-            raw_context_source: existingSource,
-            message: 'This Raw Context source was already processed. Returning the existing receipt instead of extracting it again.',
-            duplicate_of_raw_context_source_id: existingSource.id,
+            source: existingSource,
+            message: 'This Source was already processed. Returning the existing receipt instead of extracting it again.',
+            duplicate_of_source_id: existingSource.id,
             mutation: mutationReceipt(actor, {
               objectType: 'raw_context_source',
               objectId: existingSource.id,
@@ -1421,7 +1421,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         await rawContextRepo.upsertRawContextSource(db, actor.tenant_id, {
           source_type: sourceType,
           source_ref: sourceRef,
-          source_label: input.source_label ?? 'Auto-ingested Raw Context',
+          source_label: input.source_label ?? 'Auto-ingested Source',
           actor_id: actorRecordId,
           status: 'processing',
           stage: 'resolve_subjects',
@@ -1582,7 +1582,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             memory_created: 0,
             signals_created: 0,
             skipped: proposalHandoffs.length > 0 ? 0 : 1,
-            raw_context_source: updatedSource ?? undefined,
+            source: updatedSource ?? undefined,
             low_confidence_skipped: skipped,
             proposed_records: proposedRecords,
             handoff_requests: proposalHandoffs,
@@ -1616,7 +1616,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           signals_created: number;
           skipped: number;
           activity_id: string;
-          raw_context_source_id?: string;
+          source_id?: string;
           processing_receipt?: ReturnType<typeof processingReceipt>;
           failure_reason?: string;
           skipped_reasons?: string[];
@@ -1693,7 +1693,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               signals_created: count.signal,
               skipped: count.active + count.signal > 0 ? 0 : 1,
               activity_id: activity.id,
-              raw_context_source_id: rawSource?.id,
+              source_id: rawSource?.id,
               processing_receipt: receipt,
               failure_reason: rawSource?.failure_reason,
               skipped_reasons: Array.isArray(rawSource?.metadata?.skipped_reasons)
@@ -1815,7 +1815,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           processing_receipts: subjectResults
             .map(result => result.processing_receipt)
             .filter(Boolean),
-          raw_context_source: await rawContextRepo.getRawContextSourceByRef(
+          source: await rawContextRepo.getRawContextSourceByRef(
             db,
             actor.tenant_id,
             sourceType,

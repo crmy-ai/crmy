@@ -47,7 +47,7 @@ Agent guidance:
     .description('Check the seeded demo agent workflow against demo data')
     .option('--account <name>', 'Demo account name to resolve', 'Northstar Labs')
     .option('--signal-limit <n>', 'Signals to request from context_signal_group_list', '5')
-    .option('--with-model', 'Also ingest a small Raw Context source through the configured Workspace Agent model')
+    .option('--with-model', 'Also ingest a small Source through the configured Workspace Agent model')
     .option('--config <path>', 'Explicit path to a .crmy.json config file')
     .option('--json', 'Print machine-readable JSON')
     .action(async (opts) => {

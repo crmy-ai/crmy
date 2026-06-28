@@ -53,7 +53,7 @@ export class ExtractionEvalDb {
       id: options.activityId,
       tenant_id: options.tenantId,
       type: activityType,
-      subject: fixture.title ?? `Eval Raw Context ${fixture.id}`,
+      subject: fixture.title ?? `Eval Source ${fixture.id}`,
       body: fixture.document ?? '',
       outcome: null,
       occurred_at: occurredAt,

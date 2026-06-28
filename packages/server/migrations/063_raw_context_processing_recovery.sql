@@ -1,4 +1,4 @@
--- Raw Context processing recovery metadata
+-- Source processing recovery metadata
 -- Up:
 
 ALTER TABLE raw_context_sources

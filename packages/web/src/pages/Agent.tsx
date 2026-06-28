@@ -951,7 +951,7 @@ export default function Agent() {
       });
       setAttachments(prev => [result.data, ...prev.filter(item => item.id !== result.data.id)]);
       if (attachmentMode === 'raw_context') {
-        toast({ title: 'Raw Context processed', description: 'CRMy added the file to the Raw Context pipeline.' });
+        toast({ title: 'Source saved', description: 'CRMy added the file to Sources for Signal and Memory extraction.' });
       } else {
         toast({ title: 'Attachment added', description: 'It will be used as temporary Active Context on the next turn.' });
       }
@@ -1526,7 +1526,7 @@ export default function Agent() {
                       >
                         <FileText className="h-3 w-3 shrink-0" />
                         <span className="truncate max-w-[12rem]">{att.filename}</span>
-                        <span className="hidden sm:inline">{att.mode === 'raw_context' ? 'Raw Context' : 'Active Context'}</span>
+                        <span className="hidden sm:inline">{att.mode === 'raw_context' ? 'Source' : 'Active Context'}</span>
                         {!att.consumed_at && att.status === 'ready' && (
                           <button onClick={() => removeAttachment(att.id)} className="rounded-full hover:text-foreground" title="Remove attachment">
                             <X className="h-3 w-3" />
@@ -1553,7 +1553,7 @@ export default function Agent() {
                       onClick={() => fileInputRef.current?.click()}
                       disabled={uploadingAttachment || streaming}
                       className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:opacity-50"
-                      title={attachmentMode === 'raw_context' ? 'Attach and process into Raw Context' : 'Attach as temporary Active Context'}
+                      title={attachmentMode === 'raw_context' ? 'Save attachment as a Source' : 'Attach as temporary Active Context'}
                     >
                       {uploadingAttachment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                     </button>
@@ -1569,13 +1569,13 @@ export default function Agent() {
                               : 'bg-background text-muted-foreground hover:text-foreground'
                           }`}
                         >
-                          {attachmentMode === 'raw_context' ? 'Raw' : 'Chat'}
+                          {attachmentMode === 'raw_context' ? 'Source' : 'Chat'}
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="top" align="start" className="max-w-72 text-xs leading-relaxed">
                         <div className="space-y-1.5">
                           <p><span className="font-semibold text-foreground">Chat</span> uses the file only in this conversation as temporary Active Context.</p>
-                          <p><span className="font-semibold text-foreground">Raw</span> sends the file into Raw Context so CRMy can extract Signals and Memory.</p>
+                          <p><span className="font-semibold text-foreground">Source</span> saves the file so CRMy can extract Signals and Memory.</p>
                         </div>
                       </TooltipContent>
                     </Tooltip>

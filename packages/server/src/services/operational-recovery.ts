@@ -6,7 +6,7 @@ import type { DbPool } from '../db/pool.js';
 
 export type RecoverableQueue =
   | 'context_outbox'
-  | 'raw_context_sources'
+  | 'sources'
   | 'agent_turns'
   | 'context_embedding_jobs'
   | 'mailbox_sync_jobs'
@@ -60,7 +60,7 @@ const SPECS: Record<RecoverableQueue, RecoverySpec> = {
     },
     newStatus: { retry: 'pending', park: 'parked', mark_failed: 'failed' },
   },
-  raw_context_sources: {
+  sources: {
     selectSql: 'SELECT id, status FROM raw_context_sources WHERE tenant_id = $1 AND id = $2',
     updateSql: {
       retry: `

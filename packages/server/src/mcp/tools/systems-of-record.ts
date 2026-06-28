@@ -322,7 +322,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
     {
       name: 'sor_sync_run',
       tier: 'extended',
-      description: 'Run a system-of-record sync. Synced changes emit normal CRMy events with source metadata for Automations, Sequences, audit, and context extraction.',
+      description: 'Run a system-of-record sync. Synced changes emit normal CRMy events with source metadata for audit, context extraction, HITL, and experimental event handlers.',
       inputSchema: sorSyncRun,
       handler: async (input: z.infer<typeof sorSyncRun>, actor: ActorContext) =>
         runToolOperation(db, actor, 'sor_sync_run', input, async () => {

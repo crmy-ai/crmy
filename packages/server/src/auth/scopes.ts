@@ -72,9 +72,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
   context_find: ['context:read'],
   context_search: ['context:read'],
   context_list: ['context:read'],
-  context_raw_source_list: ['context:read'],
-  context_raw_source_get: ['context:read'],
-  context_raw_source_reprocess: ['context:write'],
+  context_source_list: ['context:read'],
+  context_source_get: ['context:read'],
+  context_source_reprocess: ['context:write'],
   context_stale: ['context:read'],
   context_diff: ['context:read'],
   briefing_get: ['context:read'],
@@ -303,6 +303,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
 const ADMIN_ONLY_SCOPES = [
   'api_keys:admin',
   'email_provider:admin',
+  'agent:admin',
   'hitl:admin',
 ] as const;
 

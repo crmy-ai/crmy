@@ -734,6 +734,7 @@ export interface ContextEntry {
   source?: string;
   source_ref?: string;
   source_activity_id?: UUID;
+  grounding_method?: 'lexical' | 'corroborated' | 'human_reviewed';
   valid_until?: string;
   reviewed_at?: string;
   promoted_at?: string;
@@ -1151,11 +1152,11 @@ export interface Briefing {
   /** Explains budget preset, effective budget, evidence detail, and ranking strategy used for this briefing. */
   context_packing?: ContextPackingMetadata;
   /**
-   * Optional governed product knowledge relevant to this subject. Present only
-   * when product knowledge is configured (default) or explicitly requested.
+   * Optional Trusted Facts relevant to this subject. Present only
+   * when Trusted Facts are configured (default) or explicitly requested.
    * A sibling to customer Memory — never mixed into it, and never blocks the briefing.
    */
-  product_context?: ProductContext;
+  knowledge?: KnowledgeContext;
 }
 
 export type ActionContextProposedActionType =
@@ -1193,7 +1194,7 @@ export interface ActionContextGetInput {
   evidence_mode?: EvidenceMode;
   emit_retrieval_event?: boolean;
   proposed_action?: ActionContextProposedAction;
-  include_product_context?: boolean;
+  include_knowledge?: boolean;
 }
 
 export type ActionContextReadinessStatus = 'ready' | 'review_needed' | 'blocked';
@@ -1292,7 +1293,10 @@ export interface ActionContextSourcePosture {
   instructions: string[];
 }
 
+export const ACTION_CONTEXT_PACKET_VERSION = 'crmy.action_context.v1' as const;
+
 export interface ActionContextActionPacket {
+  version: typeof ACTION_CONTEXT_PACKET_VERSION;
   action_type?: ActionContextProposedActionType;
   objective: string;
   status: ActionContextReadinessStatus;
@@ -1368,7 +1372,7 @@ export interface ActionContext {
       open_conflict_count: number;
       pending_writeback_count: number;
     };
-    product_knowledge?: ActionContextCheckStatus & {
+    knowledge?: ActionContextCheckStatus & {
       approved_claim_count: number;
       excluded_count: number;
       ungrounded_excluded_count: number;
@@ -1390,9 +1394,9 @@ export interface ActionContext {
     retrieval_event_id?: number;
     used_context_entry_ids: UUID[];
     used_signal_group_ids: UUID[];
-    /** Product knowledge claims surfaced for this action (Phase 3). */
-    used_knowledge_claim_ids?: UUID[];
-    /** Receipts proving what product knowledge was retrieved (Phase 3). */
+    /** Trusted Fact IDs surfaced for this action. */
+    used_knowledge_snippet_ids?: UUID[];
+    /** Receipts proving what Trusted Facts were retrieved (Phase 3). */
     knowledge_retrieval_receipt_ids?: string[];
     expected_receipts: string[];
   };
@@ -1585,9 +1589,9 @@ export interface EvalRunSummary {
   created_at: string;
 }
 
-// -- Governed Product Knowledge Retrieval (optional, non-blocking) --
-// Product knowledge is a governed sibling namespace to customer Memory. Retrieval
-// returns approved, grounded, cited claims with trust metadata, or a clear
+// -- Governed Knowledge Retrieval (optional, non-blocking) --
+// Trusted Facts are a governed sibling namespace to customer Memory. Retrieval
+// returns approved, grounded, cited facts with trust metadata, or a clear
 // not_configured/no_results status. It never creates Memory or writes to systems
 // of record. See docs/governed-product-knowledge-retrieval.md.
 
@@ -1668,7 +1672,7 @@ export interface KnowledgeRetrievalResult {
  * are the excluded ones (e.g. ungrounded, internal-only, stale) so a drafting
  * agent knows what NOT to assert.
  */
-export interface ProductContext {
+export interface KnowledgeContext {
   status: KnowledgeRetrievalStatus;
   relevant_claims: KnowledgeClaim[];
   proof_points: KnowledgeClaim[];
@@ -1721,7 +1725,7 @@ export interface KnowledgeClaimRecord {
 }
 
 /**
- * Outbound setup for importing governed knowledge snippets from a compatible
+ * Outbound setup for importing Trusted Facts from a compatible
  * MCP source. This is separate from API keys used by clients to access CRMy.
  */
 export interface KnowledgeSourceConnection {
@@ -1746,7 +1750,7 @@ export interface KnowledgeSourceConnection {
 export type KnowledgeReviewDecision = 'approve' | 'reject' | 'deprecate' | 'mark_stale' | 'reactivate';
 
 /**
- * Two competing product claims that may state inconsistent product truth.
+ * Two competing Trusted Facts that may state inconsistent customer-facing guidance.
  * `suggested_action` encodes source-priority resolution: an authoritative claim
  * should win over a secondary/informal one; an approved claim over an unapproved.
  */

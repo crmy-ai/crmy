@@ -96,7 +96,7 @@ const workflowGuideInput = z.object({
     'first_steps',
     'record_lookup',
     'brief_before_action',
-    'ingest_raw_context',
+    'ingest_sources',
     'review_signals',
     'promote_memory',
     'customer_outreach',
@@ -116,7 +116,7 @@ const WORKFLOW_TOOLSET: Record<z.infer<typeof workflowGuideInput>['workflow'], s
   first_steps: 'standard',
   record_lookup: 'record_lookup',
   brief_before_action: 'standard',
-  ingest_raw_context: 'ingest',
+  ingest_sources: 'ingest',
   review_signals: 'signal_review',
   promote_memory: 'memory_promotion',
   customer_outreach: 'customer_outreach',
@@ -135,7 +135,7 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
   first_steps: {
     summary: 'Start with identity, record resolution, and a briefing before choosing specialized tools.',
     recommended_tools: ['actor_whoami', 'customer_record_resolve', 'action_context_get', 'briefing_get', 'context_find', 'guide_search'],
-    avoid_tools: ['context_add for raw notes', 'direct record writes before fetching the record and relevant Action Context', 'admin/ops tools unless doing incident response'],
+    avoid_tools: ['context_add for source notes', 'direct record writes before fetching the record and relevant Action Context', 'admin/ops tools unless doing incident response'],
     next_step: 'If you have a customer name or text, call customer_record_resolve. If you already have a subject_id, call briefing_get or action_context_get.',
   },
   record_lookup: {
@@ -150,9 +150,9 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
     avoid_tools: ['customer-facing actions that ignore Action Context warnings', 'record_update/writeback tools without policy/source checks'],
     next_step: 'Call action_context_get with proposed_action when you need the operating mode: inform, warn, or require_review. If it returns human_unblock.required, call action_context_request_human_unblock to create the approval or assignment.',
   },
-  ingest_raw_context: {
-    summary: 'Send transcripts, emails, meeting notes, research, and other messy source text through Raw Context ingestion.',
-    recommended_tools: ['context_ingest_auto', 'context_ingest', 'context_raw_source_get', 'context_signal_group_list'],
+  ingest_sources: {
+    summary: 'Send transcripts, emails, meeting notes, research, and other messy source text through Source ingestion.',
+    recommended_tools: ['context_ingest_auto', 'context_ingest', 'context_source_get', 'context_signal_group_list'],
     avoid_tools: ['context_add for messy source text', 'manually splitting transcripts into Memory entries'],
     next_step: 'Use context_ingest_auto when subject IDs are unknown; use context_ingest when you already know subject_type and subject_id.',
   },
@@ -193,7 +193,7 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
     next_step: 'Call context_lineage_get for the customer subject and inspect lineage.outcomes.pending, failed, completed, and recommended_follow_up before taking the next customer-facing or system-changing action.',
   },
   ops_recovery: {
-    summary: 'Operator-only durability and data-quality workflows for stuck jobs, Raw Context retries, audit, privacy, and retention.',
+    summary: 'Operator-only durability and data-quality workflows for stuck jobs, Source retries, audit, privacy, and retention.',
     recommended_tools: ['ops_status_get', 'ops_data_quality_get', 'ops_data_quality_repair', 'ops_job_recover', 'ops_audit_get'],
     avoid_tools: ['ops repair tools outside admin/owner incident response', 'dry_run=false before reviewing counts'],
     next_step: 'Call ops_status_get or ops_data_quality_get first. For repairs, keep dry_run=true until an operator confirms.',
@@ -206,7 +206,7 @@ export function guideTools(): ToolDef[] {
       name: 'tool_guide',
       tier: 'core',
       description:
-        'Start here when you are unsure which CRMy MCP tool to use. Returns the recommended tools, tools to avoid, and next step for common workflows such as record lookup, briefing, Raw Context ingestion, Signal review, Memory promotion, customer outreach, record updates, systems writeback, post-action follow-up, and ops recovery. This tool does not mutate data.',
+        'Start here when you are unsure which CRMy MCP tool to use. Returns the recommended tools, tools to avoid, and next step for common workflows such as record lookup, briefing, Source ingestion, Signal review, Memory promotion, customer outreach, record updates, systems writeback, post-action follow-up, and ops recovery. This tool does not mutate data.',
       inputSchema: workflowGuideInput,
       handler: async (input: z.infer<typeof workflowGuideInput>, _actor: ActorContext) => {
         const workflow = input.workflow ?? 'first_steps';

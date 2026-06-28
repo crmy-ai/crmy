@@ -547,7 +547,7 @@ export default function AgentSettings() {
         </div>
 
         <div className="px-5 py-4 text-sm text-muted-foreground leading-relaxed">
-          The Workspace Agent gives the web app a model-backed operator that can read customer records, assemble persistent customer context, log activities, draft handoffs, and update state through the same scoped tools your external agents use. Use a local or self-hosted model when customer context cannot leave your environment, when you want offline/dev parity, or when you need predictable cost and data residency. Provider-hosted models are also supported; either way, access stays tenant-scoped and follows the permissions below.
+          The Workspace Agent lets CRMy extract Signals, prepare drafts, and answer record-bound questions with the same scoped tools external agents use. Use a local, self-hosted, or provider-hosted model; access stays tenant-scoped and follows the permissions below.
         </div>
       </div>
 
@@ -603,7 +603,7 @@ export default function AgentSettings() {
             <div className="p-3 rounded-lg bg-violet-500/8 border border-violet-500/20 space-y-1.5">
               <p className="text-xs font-medium text-violet-700 dark:text-violet-300">Model requirements</p>
               <p className="text-xs text-violet-700/80 dark:text-violet-300/80">
-                Enter the exact model ID from your provider or local runtime. CRMy requires tool/function calling so the Workspace Agent can use scoped tools safely. Reasoning-capable models are recommended, but not required.
+                Enter the exact model ID from your provider or local runtime. Tool calling is required so CRMy can test the model before it runs governed work.
               </p>
               <p className="text-xs text-violet-700/80 dark:text-violet-300/80">{providerDef.setupHint}</p>
             </div>
@@ -1112,7 +1112,7 @@ export default function AgentSettings() {
               <div>
                 <p className="text-sm font-medium text-foreground">Auto-promote high-confidence Signals</p>
                 <p className="text-xs text-muted-foreground">
-                  CRMy can turn confirmed Signals into Memory when confidence, source quality, evidence, and policy checks pass.
+                  CRMy can turn Signals into Memory when confidence, source quality, evidence, model certification, and policy checks pass.
                 </p>
               </div>
               <Switch
@@ -1135,7 +1135,7 @@ export default function AgentSettings() {
                   <div>
                     <p className="text-xs font-semibold text-foreground">Promotion threshold</p>
                     <p className="text-xs text-muted-foreground">
-                      Higher threshold means safer promotion and more review. Lower threshold means faster, more automatic Memory.
+	                      Higher threshold means safer promotion and more review. Lower threshold means faster, more automatic Memory after all trust gates pass.
                     </p>
                   </div>
                   <span className="text-sm font-semibold text-primary tabular-nums">{Math.round(signalPromotionThreshold * 100)}%</span>
@@ -1179,7 +1179,7 @@ export default function AgentSettings() {
                   <span>Safer</span>
                 </div>
                 <div className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
-                  Readiness scores combine extracted confidence, source quality, supporting evidence, independent sources, and conflicts. Items below this threshold stay as Signals unless a user confirms them or sends them to Handoff.
+                  Readiness scores combine extracted confidence, source quality, supporting evidence, independent sources, conflicts, and the model certification gate. Items below this threshold stay as Signals unless a user confirms them or sends them to Handoff.
                 </div>
                 <details className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
                   <summary className="cursor-pointer font-semibold text-foreground">Source quality for Signal readiness</summary>

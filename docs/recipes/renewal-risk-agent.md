@@ -230,9 +230,9 @@ activity_create {
 
 ---
 
-## Step 6 — Ingest structured renewal risk as Raw Context
+## Step 6 — Ingest structured renewal risk as a Source
 
-Create one focused renewal-risk packet and ingest it through Raw Context. This lets CRMy extract Signals, check readiness, prevent duplicate-source inflation, and keep the source-to-Memory trail visible.
+Create one focused renewal-risk packet and ingest it through Source. This lets CRMy extract Signals, check readiness, prevent duplicate-source inflation, and keep the source-to-Memory trail visible.
 
 **MCP tool call:**
 

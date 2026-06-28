@@ -15,6 +15,8 @@
 import type { DbPool } from '../db/pool.js';
 import type { UUID } from '@crmy/shared';
 import * as assignmentRepo from '../db/repos/assignments.js';
+import * as contextRepo from '../db/repos/context-entries.js';
+import { shouldMarkMemoryDueForReview } from './memory-trust.js';
 
 interface StaleEntryRow {
   id: UUID;
@@ -26,6 +28,15 @@ interface StaleEntryRow {
   title: string | null;
   body: string;
   valid_until: string;
+}
+
+export function computeMemoryIdsDueForReview(
+  rows: contextRepo.MemoryFreshnessCandidateRow[],
+  now = new Date(),
+): UUID[] {
+  return rows
+    .filter(row => shouldMarkMemoryDueForReview(row, now))
+    .map(row => row.id);
 }
 
 /**
@@ -90,6 +101,12 @@ export async function processStaleEntriesForTenant(
   tenantId: UUID,
   limit = 20,
 ): Promise<number> {
+  const freshnessRows = await contextRepo.listActiveMemoryForFreshness(db, tenantId, Math.max(100, limit * 10));
+  const dueIds = computeMemoryIdsDueForReview(freshnessRows);
+  if (dueIds.length > 0) {
+    await contextRepo.markMemoryReviewDue(db, tenantId, dueIds);
+  }
+
   const result = await db.query(
     `SELECT id, tenant_id, subject_type, subject_id, context_type,
             authored_by, title, body, valid_until
@@ -145,7 +162,15 @@ export async function processStaleEntriesForTenant(
 export async function processStaleEntries(db: DbPool, limit = 10): Promise<void> {
   const tenantsResult = await db.query(
     `SELECT DISTINCT tenant_id FROM context_entries
-     WHERE valid_until < now() AND is_current = true AND memory_status = 'active'
+     WHERE is_current = true
+       AND memory_status = 'active'
+       AND (
+         valid_until < now()
+         OR (
+           valid_until IS NULL
+           AND COALESCE(reviewed_at, promoted_at, updated_at, created_at) < now() - interval '30 days'
+         )
+       )
      LIMIT 50`,
   );
 

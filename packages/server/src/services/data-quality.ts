@@ -24,9 +24,9 @@ export type RepairableDataQualityCheck =
   | 'activities_missing_canonical_subject'
   | 'current_context_missing_search_index'
   | 'stuck_context_outbox_processing'
-  | 'stale_raw_context_sources_processing'
-  | 'stuck_raw_context_extraction_attempts_running'
-  | 'failed_raw_context_sources_retryable'
+  | 'stale_sources_processing'
+  | 'stuck_source_extraction_attempts_running'
+  | 'failed_sources_retryable'
   | 'stuck_agent_turns_running';
 
 export interface DataQualityRepairResult {
@@ -155,7 +155,7 @@ const CHECKS: CheckSpec[] = [
     `,
   },
   {
-    name: 'stale_raw_context_sources_processing',
+    name: 'stale_sources_processing',
     severity: 'warning',
     sql: `
       SELECT id, source_type, source_ref, stage, attempt_count, failure_code, updated_at
@@ -168,7 +168,7 @@ const CHECKS: CheckSpec[] = [
     `,
   },
   {
-    name: 'failed_raw_context_sources_retryable',
+    name: 'failed_sources_retryable',
     severity: 'warning',
     sql: `
       SELECT id, source_type, source_ref, stage, attempt_count, failure_code, failure_reason, updated_at
@@ -185,7 +185,7 @@ const CHECKS: CheckSpec[] = [
     `,
   },
   {
-    name: 'failed_raw_context_extraction_attempts',
+    name: 'failed_source_extraction_attempts',
     severity: 'warning',
     sql: `
       SELECT id, raw_context_source_id, activity_id, attempt_number, outcome, failure_code, failure_reason, started_at
@@ -198,7 +198,7 @@ const CHECKS: CheckSpec[] = [
     `,
   },
   {
-    name: 'stuck_raw_context_extraction_attempts_running',
+    name: 'stuck_source_extraction_attempts_running',
     severity: 'warning',
     sql: `
       SELECT id, raw_context_source_id, activity_id, attempt_number, stage, timeout_ms, started_at
@@ -437,9 +437,9 @@ function ensureRepairable(checkName: string): asserts checkName is RepairableDat
     checkName !== 'activities_missing_canonical_subject' &&
     checkName !== 'current_context_missing_search_index' &&
     checkName !== 'stuck_context_outbox_processing' &&
-    checkName !== 'stale_raw_context_sources_processing' &&
-    checkName !== 'stuck_raw_context_extraction_attempts_running' &&
-    checkName !== 'failed_raw_context_sources_retryable' &&
+    checkName !== 'stale_sources_processing' &&
+    checkName !== 'stuck_source_extraction_attempts_running' &&
+    checkName !== 'failed_sources_retryable' &&
     checkName !== 'stuck_agent_turns_running'
   ) {
     throw validationError(`Data-quality check "${checkName}" is not safely auto-repairable`);
@@ -565,8 +565,8 @@ const REPAIR_ACTIONS: Record<RepairableDataQualityCheck, {
       WHERE co.id = target.id
     `,
   },
-  stale_raw_context_sources_processing: {
-    action: 'Return stale Raw Context processing receipts to pending and requeue the linked activity extraction when possible.',
+  stale_sources_processing: {
+    action: 'Return stale Source processing receipts to pending and requeue the linked activity extraction when possible.',
     countSql: `
       SELECT count(*)::int AS count
       FROM raw_context_sources
@@ -607,8 +607,8 @@ const REPAIR_ACTIONS: Record<RepairableDataQualityCheck, {
       WHERE r.id = target.id
     `,
   },
-  failed_raw_context_sources_retryable: {
-    action: 'Return retryable Raw Context failures to pending so the shared extraction path can replay them.',
+  failed_sources_retryable: {
+    action: 'Return retryable Source failures to pending so the shared extraction path can replay them.',
     countSql: `
       SELECT count(*)::int AS count
       FROM raw_context_sources
@@ -647,8 +647,8 @@ const REPAIR_ACTIONS: Record<RepairableDataQualityCheck, {
       WHERE r.id = target.id
     `,
   },
-  stuck_raw_context_extraction_attempts_running: {
-    action: 'Mark stale Raw Context extraction attempts failed and requeue the linked activity/source for retry.',
+  stuck_source_extraction_attempts_running: {
+    action: 'Mark stale Source extraction attempts failed and requeue the linked activity/source for retry.',
     countSql: `
       SELECT count(*)::int AS count
       FROM raw_context_extraction_attempts

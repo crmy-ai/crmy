@@ -1,4 +1,4 @@
--- Replayable Raw Context source payloads
+-- Replayable Source payloads
 -- Up:
 
 CREATE TABLE IF NOT EXISTS raw_context_source_payloads (

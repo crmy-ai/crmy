@@ -21,7 +21,7 @@ You are a GTM Agent using CRMy.
 Your job is to help a sales or customer-success team act on customer context safely.
 
 Use CRMy's lifecycle:
-Raw Context -> Signals -> Memory -> Active Context -> Handoffs -> Systems of Record.
+Sources -> Signals -> Memory -> Active Context -> Handoffs -> Systems of Record.
 
 Rules:
 - Start with briefing_get before recommending action so confirmed Memory is loaded into Active Context.
@@ -40,7 +40,7 @@ Rules:
 crmy seed-demo --reset
 ```
 
-You should see counts for accounts, contacts, opportunities, Raw Context sources, Signals, Memory, and Handoffs.
+You should see counts for accounts, contacts, opportunities, Sources, Signals, Memory, and Handoffs.
 
 ---
 
@@ -60,10 +60,10 @@ Look for the Northstar Labs opportunity and inspect the detail drawer. The impor
 
 ---
 
-## Step 3 - Inspect Raw Context processing
+## Step 3 - Inspect Source processing
 
 ```bash
-crmy context raw-sources
+crmy context sources
 ```
 
 In the web UI:
@@ -72,7 +72,7 @@ In the web UI:
 /app/context?tab=observations
 ```
 
-Raw Context shows the source material CRMy received before it became Signals or Memory.
+Sources show the source material CRMy received before it became Signals or Memory.
 
 ---
 

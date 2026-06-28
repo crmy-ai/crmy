@@ -90,7 +90,7 @@ const PROFILE_THRESHOLDS: Record<EvalRunProfile, EvalThreshold[]> = {
 const SUITE_META: Record<EvalSuiteName, Omit<EvalSuiteSummary, 'case_count'>> = {
   raw_context_extraction: {
     name: 'raw_context_extraction',
-    title: 'Raw Context extraction contract',
+    title: 'Source extraction contract',
     description: 'Deterministic parser, promotion, readiness, and corpus-contract suite backed by golden model output fixtures.',
     deterministic: true,
     requires_model: false,
@@ -104,8 +104,8 @@ const SUITE_META: Record<EvalSuiteName, Omit<EvalSuiteSummary, 'case_count'>> = 
   },
   raw_context_extraction_quality: {
     name: 'raw_context_extraction_quality',
-    title: 'Raw Context extraction quality',
-    description: 'Runs messy Raw Context documents through a live or injected extraction model response and scores extraction quality without golden output input.',
+    title: 'Source extraction quality',
+    description: 'Runs messy Source documents through a live or injected extraction model response and scores extraction quality without golden output input.',
     deterministic: false,
     requires_model: true,
     requires_database: true,
@@ -118,7 +118,7 @@ const SUITE_META: Record<EvalSuiteName, Omit<EvalSuiteSummary, 'case_count'>> = 
   },
   raw_context_custom_registry: {
     name: 'raw_context_custom_registry',
-    title: 'Raw Context custom registry contract',
+    title: 'Source custom registry contract',
     description: 'Deterministic suite for registry overrides, disabled types, custom types, and Memory readiness plumbing.',
     deterministic: true,
     requires_model: false,
@@ -133,7 +133,7 @@ const SUITE_META: Record<EvalSuiteName, Omit<EvalSuiteSummary, 'case_count'>> = 
   record_resolution: {
     name: 'record_resolution',
     title: 'Record resolution contract',
-    description: 'Deterministic suite for linking Raw Context text to likely CRM subjects.',
+    description: 'Deterministic suite for linking Source text to likely CRM subjects.',
     deterministic: true,
     requires_model: false,
     requires_database: false,
@@ -184,7 +184,7 @@ const SUITE_META: Record<EvalSuiteName, Omit<EvalSuiteSummary, 'case_count'>> = 
     profiles: ['seeded_context'],
     quality_gate: true,
     uses_golden_model_output: false,
-    limitations: ['Product-knowledge retrieval cases should be added when governed product knowledge ships.'],
+    limitations: ['Trusted Fact retrieval cases should be added when governed facts ship.'],
   },
   tool_choice: {
     name: 'tool_choice',
@@ -1585,6 +1585,11 @@ function defaultAgentConfig(): AgentConfig {
     auto_promote_signals: false,
     signal_auto_promote_threshold: 0.85,
     signal_source_quality: { high: 1, medium: 0.9, lower: 0.75, fallback: 0.85 },
+    model_certification_status: 'uncertified',
+    model_certification_profile: null,
+    model_certification_run_id: null,
+    model_certification_score: null,
+    model_certified_at: null,
     backup_enabled: false,
     backup_provider: null,
     backup_base_url: null,

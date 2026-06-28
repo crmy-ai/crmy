@@ -685,7 +685,7 @@ async function extractRawContextSubjectCandidates(
   } catch {
     throw new CrmyError(
       'VALIDATION_ERROR',
-      'Workspace Agent is required to match Raw Context to customer records. Configure and test a model in Model Settings, then try again.',
+      'Workspace Agent is required to match Source to customer records. Configure and test a model in Model Settings, then try again.',
       412,
       { reason: 'agent_config_required' },
     );
@@ -702,7 +702,7 @@ Rules:
 3. Include useful hints such as email, company_name, account_name, domain, title, stage, and description when present or clearly implied.
 4. Prefer high recall: include plausible customer/company references, but set confidence below 0.6 when uncertain.
 5. Resolve accounts first. When a known account is mentioned, prefer contacts, opportunities, and use cases listed under that account before considering anything new.
-6. Use the known customer record directory when it matches the Raw Context. If a listed record matches, include its record_id exactly.
+6. Use the known customer record directory when it matches the Source. If a listed record matches, include its record_id exactly.
 7. If a contact, opportunity, or use case appears net-new under a matched account, include account_name/company_name so CRMy can route it for review.
 8. Never invent IDs or facts. Only copy record_id values from the known customer record directory.
 9. Return at most ${limit} candidates.`;
@@ -710,7 +710,7 @@ Rules:
   const user = `Known customer records:
 ${JSON.stringify(directory, null, 2)}
 
-Raw Context:
+Source:
 ${text.slice(0, 60_000)}`;
   const response = await callLLM(db, tenantId, {
     system,

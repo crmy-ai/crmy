@@ -12,10 +12,10 @@ import type {
   AdjacentContext,
   ActiveSequenceEnrollment,
   TokenBudgetProfile,
-  ProductContext,
+  KnowledgeContext,
   ActorContext,
 } from '@crmy/shared';
-import { isProductKnowledgeConfigured, getProductContextForSubject } from './knowledge-retrieval.js';
+import { isKnowledgeConfigured, getKnowledgeContextForSubject } from './knowledge-retrieval.js';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
@@ -39,7 +39,7 @@ function parseSince(since?: string): string | undefined {
   return new Date(Date.now() - ms).toISOString();
 }
 
-/** Context types that signal what product knowledge would help a draft for this subject. */
+/** Context types that signal when Trusted Facts would help a draft for this subject. */
 const PRODUCT_QUERY_TYPES = new Set([
   'objection', 'competitive_intel', 'deal_risk', 'buying_process',
   'success_criteria', 'pain_point', 'next_step', 'use_case_fit',
@@ -52,7 +52,7 @@ function subjectDisplayName(subject: Record<string, unknown>): string {
   return `${first} ${last}`.trim();
 }
 
-/** Derive a product-knowledge query from the subject and its most relevant context. */
+/** Derive a Trusted Fact query from the subject and its most relevant context. */
 function buildProductQuery(subject: Record<string, unknown>, entries: ContextEntry[]): string {
   const name = subjectDisplayName(subject);
   const parts = entries
@@ -384,9 +384,9 @@ export async function assembleBriefing(
     token_budget_profile?: TokenBudgetProfile;
     evidence_mode?: EvidenceMode;
     proposed_action_type?: ActionContextProposedActionType;
-    /** Include governed product knowledge. Defaults to true when product knowledge is configured. */
-    include_product_context?: boolean;
-    /** Actor attributed on the product-knowledge retrieval receipt. */
+    /** Include Trusted Facts. Defaults to true when Trusted Facts are configured. */
+    include_knowledge?: boolean;
+    /** Actor attributed on the Trusted Fact retrieval receipt. */
     actor_id?: string;
   },
 ): Promise<Briefing> {
@@ -550,19 +550,19 @@ export async function assembleBriefing(
     }
   }
 
-  // 12. Product context (optional, governed). Defaults on when product knowledge
-  //     is configured; strictly additive and never fails the briefing.
-  let product_context: ProductContext | undefined;
-  const wantProductContext = options?.include_product_context ?? await isProductKnowledgeConfigured(db, tenantId);
-  if (wantProductContext) {
+  // 12. Trusted Facts (optional, governed). Defaults on when configured;
+  //     strictly additive and never fails the briefing.
+  let knowledge: KnowledgeContext | undefined;
+  const wantKnowledge = options?.include_knowledge ?? await isKnowledgeConfigured(db, tenantId);
+  if (wantKnowledge) {
     try {
-      const pcActor: ActorContext = {
+      const knowledgeActor: ActorContext = {
         tenant_id: tenantId,
         actor_id: options?.actor_id ?? 'briefing',
         actor_type: 'agent',
         role: 'member',
       };
-      product_context = await getProductContextForSubject(db, pcActor, {
+      knowledge = await getKnowledgeContextForSubject(db, knowledgeActor, {
         query: buildProductQuery(subject as Record<string, unknown>, [...ownEntries, ...ownSignals]),
         subject_type: subjectType,
         subject_id: subjectId,
@@ -571,9 +571,9 @@ export async function assembleBriefing(
         limit: 6,
       });
     } catch {
-      product_context = {
+      knowledge = {
         status: 'degraded', relevant_claims: [], proof_points: [], implementation_caveats: [],
-        competitive_context: [], avoid_claims: [], warnings: ['Product context temporarily unavailable.'], citations: [],
+        competitive_context: [], avoid_claims: [], warnings: ['Trusted Facts temporarily unavailable.'], citations: [],
       };
     }
   }
@@ -594,7 +594,7 @@ export async function assembleBriefing(
     ...(tokenEstimate !== undefined ? { token_estimate: tokenEstimate } : {}),
     ...(truncated !== undefined ? { truncated } : {}),
     ...(droppedEntries?.length ? { dropped_entries: droppedEntries } : {}),
-    ...(product_context ? { product_context } : {}),
+    ...(knowledge ? { knowledge } : {}),
     context_packing: {
       ...(tokenBudget.profile ? { token_budget_profile: tokenBudget.profile } : {}),
       ...(tokenBudget.budget ? { token_budget: tokenBudget.budget } : {}),
@@ -830,17 +830,17 @@ export function formatBriefingText(briefing: Briefing): string {
     lines.push('');
   }
 
-  if (briefing.product_context && briefing.product_context.status === 'available') {
-    const pc = briefing.product_context;
-    lines.push('--- Knowledge Claims (governed, approved + grounded) ---');
-    lines.push('  Use these approved, cited claims to ground customer-facing statements. Do not assert anything not listed here.');
+  if (briefing.knowledge && briefing.knowledge.status === 'available') {
+    const pc = briefing.knowledge;
+    lines.push('--- Trusted Facts (approved + grounded) ---');
+    lines.push('  Use these approved, cited facts to ground customer-facing statements. Do not assert anything not listed here.');
     for (const claim of pc.relevant_claims) {
       const cite = claim.citations[0];
       const citeText = cite ? ` [${cite.source_label}]` : '';
       lines.push(`  • [${claim.knowledge_type}/${claim.category}] ${claim.title}: ${claim.body.slice(0, 240)}${citeText}`);
     }
     if (pc.avoid_claims.length > 0) {
-      lines.push(`  ⚠ ${pc.avoid_claims.length} claim(s) excluded (not customer-safe); do not use them.`);
+      lines.push(`  ⚠ ${pc.avoid_claims.length} fact(s) excluded (not customer-safe); do not use them.`);
     }
     lines.push('');
   }

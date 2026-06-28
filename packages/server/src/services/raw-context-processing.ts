@@ -38,7 +38,7 @@ async function actorForRawContextSource(
   source: rawContextRepo.RawContextSource,
 ): Promise<ActorContext> {
   if (!source.actor_id) {
-    throw new Error('Raw Context source has no actor. Link an owner or reprocess from the app.');
+    throw new Error('Source has no actor. Link an owner or reprocess from the app.');
   }
 
   const result = await db.query(
@@ -51,10 +51,10 @@ async function actorForRawContextSource(
   );
   const actor = result.rows[0] as ActorRow | undefined;
   if (!actor) {
-    throw new Error('Raw Context source actor no longer exists. Reprocess from a visible record.');
+    throw new Error('Source actor no longer exists. Reprocess from a visible record.');
   }
   if (actor.is_active === false) {
-    throw new Error('Raw Context source actor is inactive. Reprocess from an active user or agent.');
+    throw new Error('Source actor is inactive. Reprocess from an active user or agent.');
   }
 
   if (actor.actor_type === 'human') {
@@ -100,8 +100,8 @@ export async function processPendingRawContextSources(
   const sources = await rawContextRepo.claimPendingRawContextSources(db, Math.max(1, Math.min(limit, 25)));
   if (sources.length === 0) return { claimed: 0, succeeded: 0, failed: 0 };
 
-  const tool = getAllTools(db).find(candidate => candidate.name === 'context_raw_source_reprocess');
-  if (!tool) throw new Error('context_raw_source_reprocess tool is not registered');
+  const tool = getAllTools(db).find(candidate => candidate.name === 'context_source_reprocess');
+  if (!tool) throw new Error('context_source_reprocess tool is not registered');
 
   let succeeded = 0;
   let failed = 0;

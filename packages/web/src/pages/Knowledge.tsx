@@ -12,7 +12,7 @@ export default function Knowledge() {
         title="Knowledge"
         icon={BookOpen}
         iconClassName="text-[#f59e0b]"
-        description="Governed claims for briefings and customer-facing work"
+        description="Trusted Facts for briefings and customer-facing work"
       />
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <KnowledgeGovernanceSettings />

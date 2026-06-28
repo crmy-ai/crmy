@@ -7,14 +7,14 @@ The engine works connector-free: transcripts, notes, and emails are enough to pr
 The engine is not just storage. It is a loop:
 
 ```text
-Raw Context -> Subject Graph -> Signals -> Memory -> Briefing / Action Context -> Handoff / Writeback -> Proof
+Sources -> Subject Graph -> Signals -> Memory -> Briefing / Action Context -> Handoff / Writeback -> Proof
 ```
 
 ## What the engine does
 
-### 1. Capture Raw Context
+### 1. Capture Sources
 
-Raw Context is source material before it is confirmed: call transcripts, meeting notes, customer emails, calendar meetings, CRM changes, warehouse changes, support/product signals, uploaded files, REST calls, CLI inputs, and MCP tool calls.
+Sources are the source material before anything is confirmed: call transcripts, meeting notes, customer emails, calendar meetings, CRM changes, warehouse changes, support/product signals, uploaded files, REST calls, CLI inputs, and MCP tool calls.
 
 Each source should produce a processing receipt that says what CRMy matched, extracted, skipped, retried, or failed. Receipts make extraction replayable and debuggable.
 
@@ -34,7 +34,7 @@ The resolver should prefer the safest known parent record and keep ambiguity rev
 
 ### 3. Extract Signals
 
-Signals are inferred claims from Raw Context. They carry evidence, confidence, source lineage, readiness, and review state. A Signal is not confirmed Memory yet.
+Signals are inferred claims from Sources. They carry evidence, confidence, source lineage, readiness, and review state. A Signal is not confirmed Memory yet.
 
 Examples:
 
@@ -88,8 +88,8 @@ Handoffs, writeback previews, policy checks, idempotency, execution receipts, au
 
 The current engine includes:
 
-- durable Raw Context processing receipts;
-- replayable raw-source payload storage;
+- durable Source processing receipts;
+- replayable source payload storage;
 - retry metadata and stale-processing recovery;
 - malformed JSON recovery for local-model extraction;
 - account-scoped subject resolution;

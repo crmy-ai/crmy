@@ -122,9 +122,9 @@ const WORKSPACE_AGENT_TOOL_ALLOWLIST = new Set([
   'context_ingest_auto',
   'context_ingest',
   'context_add',
-  'context_raw_source_list',
-  'context_raw_source_get',
-  'context_raw_source_reprocess',
+  'context_source_list',
+  'context_source_get',
+  'context_source_reprocess',
   'context_signal_group_list',
   'context_signal_group_get',
   'context_signal_group_promote',
@@ -1230,7 +1230,7 @@ function buildSystemPrompt(
     workflowLines.push(
       '',
       '**Record creation requests**:',
-      '- If the user asks to create or update a customer record, explain that Workspace Agent customer-record writes are disabled in Model Settings. You may still draft the proposed fields or help the user add Raw Context.',
+      '- If the user asks to create or update a customer record, explain that Workspace Agent customer-record writes are disabled in Model Settings. You may still draft the proposed fields or help the user add Source.',
     );
   }
   parts.push(workflowLines.join('\n'));
@@ -1261,7 +1261,7 @@ function buildSystemPrompt(
   const activities = pick('activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete', 'availability_suggest_times');
   if (activities) toolLines.push(`**Activities:** ${activities}`);
 
-  const ctx = pick('context_find', 'context_ingest_auto', 'context_ingest', 'context_get', 'context_lineage_get', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject', 'context_add', 'context_list', 'context_search', 'context_stale', 'context_raw_source_list', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_review_batch', 'context_bulk_mark_stale');
+  const ctx = pick('context_find', 'context_ingest_auto', 'context_ingest', 'context_get', 'context_lineage_get', 'context_source_get', 'context_source_reprocess', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject', 'context_add', 'context_list', 'context_search', 'context_stale', 'context_source_list', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_review_batch', 'context_bulk_mark_stale');
   if (ctx) toolLines.push(`**Context memory:** ${ctx}`);
 
   const hitl = pick('action_context_request_human_unblock', 'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending');
@@ -1281,7 +1281,7 @@ function buildSystemPrompt(
     'opportunity_search', 'opportunity_get', 'opportunity_create', 'opportunity_update', 'opportunity_advance_stage', 'deal_advance',
     'use_case_search', 'use_case_get', 'use_case_create', 'use_case_update', 'use_case_advance_stage', 'use_case_get_timeline', 'use_case_summary',
     'activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete', 'availability_suggest_times',
-    'context_add', 'context_get', 'context_find', 'context_lineage_get', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_group_list', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
+    'context_add', 'context_get', 'context_find', 'context_lineage_get', 'context_list', 'context_source_list', 'context_source_get', 'context_source_reprocess', 'context_signal_group_list', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
     'action_context_request_human_unblock', 'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending',
     'email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list',
     'pipeline_summary', 'pipeline_forecast', 'tenant_get_stats', 'crm_search',

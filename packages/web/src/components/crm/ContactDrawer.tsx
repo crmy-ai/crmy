@@ -396,6 +396,7 @@ export function ContactDrawer() {
                   score={leadScore}
                   onRescore={() => rescore.mutate(undefined, { onSuccess: () => { /* query invalidated in hook */ } })}
                   rescoring={rescore.isPending}
+                  showLabel
                 />
               )}
             </div>

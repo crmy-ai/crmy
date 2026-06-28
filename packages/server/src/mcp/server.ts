@@ -129,7 +129,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...emailTools(db),
     ...calendarTools(db),
     ...contextSourceDropTools(db),
-    ...knowledgeTools(db),       // knowledge_retrieve (optional governed product knowledge)
+    ...knowledgeTools(db),       // knowledge_retrieve (optional Trusted Facts)
     ...emailSequenceTools(db),
     ...subjectGraphTools(db),
     ...entityResolveTools(db),

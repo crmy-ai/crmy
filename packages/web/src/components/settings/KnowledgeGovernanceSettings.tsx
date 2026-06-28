@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Knowledge claims governance (admin).
+ * Trusted Facts governance (admin).
  *
  * The UI surface for the Phase 7 governance tools (knowledge_claim_list,
  * knowledge_claim_review, knowledge_conflicts_detect). Optional and
- * non-blocking: when no knowledge claims are configured this shows an
+ * non-blocking: when no Trusted Facts are configured this shows an
  * explanatory empty state, never an error. Customer-facing eligibility
  * (approved + external use) is the most consequential decision here, so it is
  * an explicit, separate action from internal approval.
@@ -35,10 +35,10 @@ type KnowledgeTypeFilter = 'all' | KnowledgeClaimRecord['knowledge_type'];
 
 const FILTERS: { key: FilterKey; label: string; filters: KnowledgeClaimListFilters }[] = [
   { key: 'needs_review', label: 'Needs review', filters: { needs_review: true } },
-  { key: 'active',       label: 'Active',        filters: { status: 'active' } },
+  { key: 'active',       label: 'Trusted',       filters: { status: 'active' } },
   { key: 'stale',        label: 'Stale',         filters: { status: 'stale' } },
   { key: 'conflicting',  label: 'Conflicting',   filters: { status: 'conflicting' } },
-  { key: 'pending',      label: 'Pending approval', filters: { approval_status: 'pending' } },
+  { key: 'pending',      label: 'Fact candidates', filters: { approval_status: 'pending' } },
   { key: 'all',          label: 'All',           filters: {} },
 ];
 
@@ -61,11 +61,26 @@ const STATUS_TONE: Record<string, string> = {
   rejected: 'border-border bg-muted text-muted-foreground',
 };
 
+const STATUS_LABEL: Record<string, string> = {
+  active: 'live',
+  stale: 'needs review',
+  conflicting: 'conflict',
+  deprecated: 'retired',
+  rejected: 'rejected',
+};
+
 const APPROVAL_TONE: Record<string, string> = {
   approved: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600',
   pending: 'border-warning/30 bg-warning/10 text-warning',
   unapproved: 'border-border bg-muted text-muted-foreground',
   rejected: 'border-destructive/30 bg-destructive/10 text-destructive',
+};
+
+const APPROVAL_LABEL: Record<string, string> = {
+  approved: 'approved',
+  pending: 'fact candidate',
+  unapproved: 'fact candidate',
+  rejected: 'rejected',
 };
 
 const CONFLICT_TONE: Record<string, string> = {
@@ -83,26 +98,30 @@ function typeLabel(type: KnowledgeClaimRecord['knowledge_type']): string {
   return type.charAt(0).toUpperCase() + type.slice(1);
 }
 
+function formatFactCount(count: number): string {
+  return `${count} ${count === 1 ? 'fact' : 'facts'}`;
+}
+
 function customerGate(claim: KnowledgeClaimRecord, expired: boolean): { label: string; tone: string } {
   if (claim.status === 'deprecated' || claim.status === 'rejected') {
     return { label: 'retired', tone: 'border-border bg-muted text-muted-foreground' };
   }
   if (!claim.grounded) {
-    return { label: 'needs grounding', tone: 'border-warning/30 bg-warning/10 text-warning' };
+    return { label: 'needs review', tone: 'border-warning/30 bg-warning/10 text-warning' };
   }
   if (claim.status === 'conflicting') {
-    return { label: 'conflict review', tone: 'border-destructive/30 bg-destructive/10 text-destructive' };
+    return { label: 'needs review', tone: 'border-destructive/30 bg-destructive/10 text-destructive' };
   }
   if (claim.status === 'stale' || expired) {
-    return { label: 'needs re-verification', tone: 'border-warning/30 bg-warning/10 text-warning' };
+    return { label: 'needs review', tone: 'border-warning/30 bg-warning/10 text-warning' };
   }
   if (claim.approval_status !== 'approved') {
-    return { label: 'needs approval', tone: 'border-warning/30 bg-warning/10 text-warning' };
+    return { label: 'fact candidate', tone: 'border-warning/30 bg-warning/10 text-warning' };
   }
   if (!claim.approved_for_external_use || claim.visibility !== 'external') {
-    return { label: 'internal-approved', tone: 'border-border bg-muted text-muted-foreground' };
+    return { label: 'internal only', tone: 'border-border bg-muted text-muted-foreground' };
   }
-  return { label: 'customer-safe', tone: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600' };
+  return { label: 'trusted', tone: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600' };
 }
 
 function ClaimCard({ claim }: { claim: KnowledgeClaimRecord }) {
@@ -122,17 +141,17 @@ function ClaimCard({ claim }: { claim: KnowledgeClaimRecord }) {
   const gate = customerGate(claim, expired);
   const customerActionLabel = isApproved
     ? claim.status === 'stale'
-      ? 'Re-verify for customer use'
+      ? 'Re-verify as trusted'
       : claim.status === 'conflicting'
-        ? 'Resolve as customer-safe'
-        : 'Allow customer use'
-    : 'Approve for customer use';
+        ? 'Mark trusted'
+        : 'Trust for customer use'
+    : 'Approve as trusted';
 
   const apply = (decision: KnowledgeReviewDecision, approved_for_external_use?: boolean) => {
     review.mutate(
       { id: claim.id, decision, approved_for_external_use },
       {
-        onSuccess: (updated) => toast({ title: 'Claim updated', description: `"${claim.title}" → ${updated.status} / ${updated.approval_status}` }),
+        onSuccess: (updated) => toast({ title: 'Trusted Fact updated', description: `"${claim.title}" -> ${updated.status} / ${updated.approval_status}` }),
         onError: (err: unknown) => toast({ title: 'Review failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' }),
       },
     );
@@ -152,8 +171,8 @@ function ClaimCard({ claim }: { claim: KnowledgeClaimRecord }) {
       </div>
 
       <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-        <Badge tone={STATUS_TONE[claim.status] ?? STATUS_TONE.deprecated}>{claim.status}</Badge>
-        <Badge tone={APPROVAL_TONE[claim.approval_status] ?? APPROVAL_TONE.unapproved}>{claim.approval_status}</Badge>
+        <Badge tone={STATUS_TONE[claim.status] ?? STATUS_TONE.deprecated}>{STATUS_LABEL[claim.status] ?? claim.status}</Badge>
+        <Badge tone={APPROVAL_TONE[claim.approval_status] ?? APPROVAL_TONE.unapproved}>{APPROVAL_LABEL[claim.approval_status] ?? claim.approval_status}</Badge>
         <Badge tone={gate.tone}>{gate.label}</Badge>
         <Badge tone="border-border bg-muted text-muted-foreground">{claim.source_priority}</Badge>
         {!claim.grounded && <Badge tone="border-warning/30 bg-warning/10 text-warning">ungrounded</Badge>}
@@ -178,17 +197,17 @@ function ClaimCard({ claim }: { claim: KnowledgeClaimRecord }) {
         )}
         {claim.status === 'active' && (
           <button className={btnOutline} disabled={review.isPending} onClick={() => apply('mark_stale')}>
-            <Clock className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Mark stale
+            <Clock className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Mark needs review
           </button>
         )}
         {((claim.status === 'stale' && !expired) || isRetired) && (
           <button className={btnOutline} disabled={review.isPending} onClick={() => apply('reactivate')}>
-            <RotateCcw className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Reactivate
+            <RotateCcw className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Restore
           </button>
         )}
         {claim.status !== 'deprecated' && (
           <button className={btnOutline} disabled={review.isPending} onClick={() => apply('deprecate')}>
-            <Archive className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Deprecate
+            <Archive className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Retire
           </button>
         )}
         {claim.status !== 'rejected' && (
@@ -207,16 +226,22 @@ function ConflictsPanel() {
   const result = detect.data;
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
+    <details className="rounded-lg border border-border bg-card p-3">
+      <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-foreground">
+        <span className="flex items-center gap-2">
           <GitCompareArrows className="w-4 h-4 text-info" />
-          <span className="font-semibold text-sm text-foreground">Conflict detection</span>
-        </div>
+          Advanced conflict scan
+        </span>
+        <span className="text-xs font-normal text-muted-foreground">Run when facts disagree</span>
+      </summary>
+      <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+        <p className="max-w-xl text-xs leading-5 text-muted-foreground">
+          CRMy already keeps stale, conflicting, unapproved, and ungrounded facts out of customer-facing retrieval. Use this scan when you want to review competing facts across sources.
+        </p>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
             <input type="checkbox" checked={applyResolution} onChange={(e) => setApplyResolution(e.target.checked)} />
-            Mark the lower-priority claim conflicting
+            Mark lower-priority fact conflicting
           </label>
           <button
             className={btnPrimary}
@@ -232,7 +257,7 @@ function ConflictsPanel() {
         </div>
       </div>
       {result && result.conflicts.length === 0 && (
-        <p className="mt-3 text-sm text-muted-foreground">No competing claims detected.</p>
+        <p className="mt-3 text-sm text-muted-foreground">No competing facts detected.</p>
       )}
       {result && result.conflicts.length > 0 && (
         <div className="mt-3 space-y-2">
@@ -248,7 +273,7 @@ function ConflictsPanel() {
           ))}
         </div>
       )}
-    </div>
+    </details>
   );
 }
 
@@ -267,6 +292,7 @@ export default function KnowledgeGovernanceSettings() {
   });
   const claims = data?.claims ?? [];
   const noKnowledgeConfigured = filterKey === 'all' && typeFilter === 'all' && !query && !isLoading && claims.length === 0;
+  const visibleFactCount = data?.count ?? claims.length;
 
   return (
     <div className="space-y-4">
@@ -274,8 +300,8 @@ export default function KnowledgeGovernanceSettings() {
         <div className="flex flex-col gap-3 border-b border-border px-3 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-2">
             <BookOpen className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold text-foreground">Knowledge Claims</span>
-            <span className="text-xs text-muted-foreground">{data?.count ?? claims.length} shown</span>
+            <span className="text-sm font-semibold text-foreground">Trusted Facts</span>
+            <span className="text-xs text-muted-foreground">{formatFactCount(visibleFactCount)} shown</span>
           </div>
           <form
             className="flex min-w-0 items-center gap-2"
@@ -285,7 +311,7 @@ export default function KnowledgeGovernanceSettings() {
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 className={`${inputCls} w-full pl-8`}
-                placeholder="Search claims..."
+                placeholder="Search facts..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
               />
@@ -337,30 +363,30 @@ export default function KnowledgeGovernanceSettings() {
       {isError && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive flex items-center gap-2">
           <AlertTriangle className="w-4 h-4" />
-          {error instanceof Error ? error.message : 'Failed to load knowledge claims.'}
+          {error instanceof Error ? error.message : 'Failed to load Trusted Facts.'}
         </div>
       )}
 
       {!isLoading && !isError && noKnowledgeConfigured && (
         <div className="rounded-lg border border-border bg-card p-6 text-center">
           <BookOpen className="w-6 h-6 mx-auto text-muted-foreground" />
-          <p className="mt-2 text-sm font-medium text-foreground">No knowledge claims configured</p>
+          <p className="mt-2 text-sm font-medium text-foreground">No Trusted Facts configured</p>
           <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">
-            Author approved, source-grounded claims via the <code>knowledge_claim_upsert</code> tool or your source adapters.
-            Until then, CRMy works exactly as it does today.
+            Connect an MCP Knowledge Source when you are ready to sync company, product, or competitor facts.
+            Until then, briefings and drafts keep working from customer context.
           </p>
         </div>
       )}
 
       {!isLoading && !isError && !noKnowledgeConfigured && claims.length === 0 && (
         <div className="rounded-lg border border-border bg-card p-6 text-center text-sm text-muted-foreground">
-          {filterKey === 'needs_review' ? 'Nothing needs review right now.' : 'No claims match this filter.'}
+          {filterKey === 'needs_review' ? 'Nothing needs review right now.' : 'No facts match this filter.'}
         </div>
       )}
 
       {!isLoading && !isError && claims.length > 0 && (
         <div className="space-y-3">
-          <p className="text-xs text-muted-foreground">{data?.count ?? claims.length} claim(s)</p>
+          <p className="text-xs text-muted-foreground">{formatFactCount(visibleFactCount)}</p>
           {claims.map(c => <ClaimCard key={c.id} claim={c} />)}
         </div>
       )}

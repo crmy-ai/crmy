@@ -1,6 +1,6 @@
 {
   "name": "@crmy/core",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "CRMy — operational customer context for AI agents",
   "private": false,
   "files": [

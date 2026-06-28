@@ -397,6 +397,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdminActor(actor);
+      requireScopes(actor, 'systems:read');
       res.json(await listKnowledgeSourceConnections(db, actor));
     } catch (err) { handleError(res, err); }
   });
@@ -405,6 +406,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdminActor(actor);
+      requireScopes(actor, 'systems:admin');
       const input = knowledgeSourceCreate.parse(req.body ?? {});
       res.status(201).json(await createKnowledgeSourceConnection(db, actor, input));
     } catch (err) { handleError(res, err); }
@@ -414,6 +416,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdminActor(actor);
+      requireScopes(actor, 'systems:admin');
       const input = knowledgeSourcePatch.parse(req.body ?? {});
       res.json(await updateKnowledgeSourceConnection(db, actor, p(req, 'id'), input));
     } catch (err) { handleError(res, err); }
@@ -423,6 +426,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdminActor(actor);
+      requireScopes(actor, 'systems:admin');
       res.json(await deleteKnowledgeSourceConnection(db, actor, p(req, 'id')));
     } catch (err) { handleError(res, err); }
   });
@@ -431,6 +435,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdminActor(actor);
+      requireScopes(actor, 'systems:admin');
       res.json(await testKnowledgeSourceConnection(db, actor, p(req, 'id')));
     } catch (err) { handleError(res, err); }
   });
@@ -439,6 +444,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdminActor(actor);
+      requireScopes(actor, 'systems:admin', 'knowledge:write');
       const input = z.object({ limit: z.number().int().min(1).max(100).optional() }).parse(req.body ?? {});
       res.json(await syncKnowledgeSourceConnection(db, actor, p(req, 'id'), input));
     } catch (err) { handleError(res, err); }
@@ -810,14 +816,14 @@ export function apiRouter(db: DbPool): Router {
         objectId: updated.id,
         afterData: {
           artifact_type: artifactType,
-          raw_context_source_id: rawSource?.id ?? null,
+          source_id: rawSource?.id ?? null,
           memory_created: extraction.memory_created,
           signals_created: extraction.signals_created,
         },
       }).catch(() => {});
       res.json({
         activity: updated,
-        raw_context_source: rawSource,
+        source: rawSource,
         extraction: {
           memory_created: extraction.memory_created,
           signals_created: extraction.signals_created,
@@ -1936,6 +1942,7 @@ export function apiRouter(db: DbPool): Router {
   router.get('/context-source-connections', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireScopes(actor, 'systems:read');
       res.json(await listContextSourceConnections(db, actor));
     } catch (err) { handleError(res, err); }
   });
@@ -1944,6 +1951,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdminActor(actor);
+      requireScopes(actor, 'systems:admin');
       const parsed = z.object({
         name: z.string().min(1).max(200),
         provider: z.enum(['s3', 'local_folder']),
@@ -1959,6 +1967,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdminActor(actor);
+      requireScopes(actor, 'systems:admin');
       const parsed = z.object({
         name: z.string().min(1).max(200).optional(),
         status: z.enum(['configured', 'syncing', 'error', 'disabled']).optional(),
@@ -1973,6 +1982,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdminActor(actor);
+      requireScopes(actor, 'systems:admin');
       res.json(await deleteContextSourceConnection(db, actor, p(req, 'id')));
     } catch (err) { handleError(res, err); }
   });
@@ -1981,6 +1991,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdminActor(actor);
+      requireScopes(actor, 'systems:admin');
       res.status(202).json(await enqueueContextSourceSync(db, actor, p(req, 'id')));
     } catch (err) { handleError(res, err); }
   });
@@ -2499,7 +2510,7 @@ export function apiRouter(db: DbPool): Router {
           patch.processing_reason = 'Marked as non-customer email.';
         } else if (message.processing_status === 'skipped' || message.processing_status === 'needs_review') {
           patch.processing_status = 'unprocessed';
-          patch.processing_reason = 'Customer record link updated. Ready to process as Raw Context.';
+          patch.processing_reason = 'Customer record link updated. Ready to process as a Source.';
         }
       }
       if (Object.keys(patch).length === 0) {
@@ -3641,7 +3652,7 @@ export function apiRouter(db: DbPool): Router {
         subject_id: qs(req.query.subject_id),
         context_entry_id: qs(req.query.context_entry_id),
         signal_group_id: qs(req.query.signal_group_id),
-        raw_context_source_id: qs(req.query.raw_context_source_id),
+        source_id: qs(req.query.source_id),
       }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
@@ -3711,7 +3722,7 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
-  router.get('/context/raw-sources', async (req: Request, res: Response) => {
+  router.get('/context/sources', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       requireScopes(actor, 'context:read');
@@ -3732,20 +3743,20 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
-  router.get('/context/raw-sources/:id', async (req: Request, res: Response) => {
+  router.get('/context/sources/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       requireScopes(actor, 'context:read');
-      const handler = toolHandler(db, 'context_raw_source_get');
+      const handler = toolHandler(db, 'context_source_get');
       res.json(await handler({ id: p(req, 'id') }, actor));
     } catch (err) { handleError(res, err); }
   });
 
-  router.post('/context/raw-sources/:id/reprocess', async (req: Request, res: Response) => {
+  router.post('/context/sources/:id/reprocess', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       requireScopes(actor, 'context:write');
-      const handler = toolHandler(db, 'context_raw_source_reprocess');
+      const handler = toolHandler(db, 'context_source_reprocess');
       res.json(await handler({ id: p(req, 'id') }, actor));
     } catch (err) {
       handleError(res, err);
@@ -3908,17 +3919,18 @@ export function apiRouter(db: DbPool): Router {
   });
 
   // Accept a file upload (base64-encoded) and extract text, then detect subjects.
-  // Body: { filename: string, data: string (base64), source_label?: string }
-  // Returns: { text_preview, truncated, subjects, filename }
+  // Body: { filename: string, data: string (base64), source_label?: string, include_text?: boolean }
+  // Returns: { text_preview, truncated, subjects, filename } and full_text only when explicitly requested.
   router.post('/context/ingest-file', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      requireScopes(actor, 'context:read');
-      const { filename, data, source_label } = req.body as {
-        filename: string;
-        data: string;
-        source_label?: string;
-      };
+      requireScopes(actor, 'context:write');
+      const { filename, data, source_label, include_text } = z.object({
+        filename: z.string().min(1).max(255),
+        data: z.string().min(1),
+        source_label: z.string().max(255).optional(),
+        include_text: z.boolean().optional().default(false),
+      }).parse(req.body ?? {});
 
       if (!filename || !data) {
         return res.status(400).json({ error: 'filename and data (base64) are required' });
@@ -3954,7 +3966,7 @@ export function apiRouter(db: DbPool): Router {
 
       return res.json({
         text_preview: text.slice(0, 600),
-        full_text: text,
+        ...(include_text ? { full_text: text } : {}),
         truncated,
         subjects: detection.subjects,
         skipped: detection.skipped,
@@ -4206,8 +4218,7 @@ export function apiRouter(db: DbPool): Router {
         actor.tenant_id,
         subjectType as 'contact' | 'account' | 'opportunity' | 'use_case',
         subjectId,
-        // Compact text endpoint does not render product context; skip the extra retrieval.
-        { include_stale: false, include_product_context: false },
+        { include_stale: false, include_knowledge: true },
       );
 
       // Build compact text representation for the LLM
@@ -4240,6 +4251,16 @@ export function apiRouter(db: DbPool): Router {
           }
         }
       }
+      if (briefing.knowledge?.status === 'available') {
+        const relevantClaims = briefing.knowledge.relevant_claims ?? [];
+        for (const claim of relevantClaims.slice(0, 4)) {
+          const cite = claim.citations?.[0]?.source_label ? ` Source: ${claim.citations[0].source_label}.` : '';
+          lines.push(`Trusted Fact (${claim.knowledge_type}/${claim.category}): ${claim.title}: ${String(claim.body ?? '').slice(0, 220)}.${cite}`);
+        }
+        if ((briefing.knowledge.avoid_claims ?? []).length > 0) {
+          lines.push(`Excluded Trusted Facts: ${briefing.knowledge.avoid_claims.length} unsafe or unapproved fact(s) must not be used.`);
+        }
+      }
 
       // Need at least a few meaningful lines to generate a useful summary
       if (lines.length < 3) {
@@ -4249,7 +4270,7 @@ export function apiRouter(db: DbPool): Router {
 
       const { callLLM } = await import('../agent/providers/llm.js');
       const summary = await callLLM(db, actor.tenant_id, {
-        system: 'You are a concise CRM assistant. Summarize the CRM record in 2–3 sentences. Focus on what matters most right now — current status, open items, risks, or relationship context. Be specific and actionable. No filler phrases.',
+        system: 'You are a concise CRM assistant. Summarize the CRM record in 2-3 sentences. Focus on what matters most right now: current status, open items, risks, relationship context, and approved Trusted Facts when present. Do not use excluded facts. Be specific and actionable. No filler phrases.',
         user: lines.join('\n'),
         maxTokens: 200,
       });
@@ -4698,7 +4719,7 @@ export function apiRouter(db: DbPool): Router {
 	               WHERE em.tenant_id = m.tenant_id AND em.mailbox_connection_id = m.id
 	                 AND em.processing_status = 'processed'
 	             ),
-	             'raw_context_sources', (
+	             'sources', (
 	               SELECT count(DISTINCT em.raw_context_source_id)::int
 	               FROM email_messages em
 	               WHERE em.tenant_id = m.tenant_id AND em.mailbox_connection_id = m.id
@@ -4747,7 +4768,7 @@ export function apiRouter(db: DbPool): Router {
 	               WHERE ce.tenant_id = c.tenant_id AND ce.calendar_connection_id = c.id
 	                 AND ce.processing_status = 'processed'
 	             ),
-	             'raw_context_sources', (
+	             'sources', (
 	               SELECT count(DISTINCT ce.raw_context_source_id)::int
 	               FROM calendar_events ce
 	               WHERE ce.tenant_id = c.tenant_id AND ce.calendar_connection_id = c.id
@@ -4789,7 +4810,7 @@ export function apiRouter(db: DbPool): Router {
 	          connected_calendar_count: calendars.filter((calendar: Record<string, unknown>) => calendar.status === 'connected').length,
 	          email_processed_count: mailboxes.reduce((sum: number, mailbox: Record<string, unknown>) => sum + Number(mailbox.processed_messages ?? 0), 0),
 	          calendar_processed_count: calendars.reduce((sum: number, calendar: Record<string, unknown>) => sum + Number(calendar.processed_events ?? 0), 0),
-	          raw_context_source_count: [...mailboxes, ...calendars].reduce((sum: number, connection: Record<string, unknown>) => sum + Number(connection.raw_context_sources ?? 0), 0),
+	          source_count: [...mailboxes, ...calendars].reduce((sum: number, connection: Record<string, unknown>) => sum + Number(connection.sources ?? 0), 0),
 	          signal_count: [...mailboxes, ...calendars].reduce((sum: number, connection: Record<string, unknown>) => sum + Number(connection.signals_created ?? 0), 0),
 	          memory_count: [...mailboxes, ...calendars].reduce((sum: number, connection: Record<string, unknown>) => sum + Number(connection.memory_created ?? 0), 0),
 	        };

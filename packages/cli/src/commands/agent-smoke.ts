@@ -47,7 +47,7 @@ interface AgentSmokeResult {
   model_extraction?: {
     attempted: boolean;
     extracted_count: number;
-    raw_context_source_id?: string;
+    source_id?: string;
     duplicate?: boolean;
   };
   checks: SmokeCheck[];
@@ -229,12 +229,12 @@ export async function runAgentSmoke(options: {
         detail: lineageNodeCount > 0
           ? `Lineage returned ${lineageNodeCount} node(s), ${lineageEdgeCount} edge(s), ${lineagePendingOutcomeCount} pending outcome(s), and ${lineageFailedOutcomeCount} failed outcome(s).`
           : 'Lineage returned no source-to-context proof nodes.',
-        fix: lineageNodeCount > 0 ? undefined : 'Run `crmy seed-demo` or process Raw Context before checking lineage.',
+        fix: lineageNodeCount > 0 ? undefined : 'Run `crmy seed-demo` or process a Source before checking lineage.',
       });
 
       if (options.withModel) {
         if (!options.json) {
-          info('Running model-backed Raw Context extraction. Local models can take 30-60 seconds...');
+          info('Running model-backed Source extraction. Local models can take 30-60 seconds...');
         }
         const ingestResult = await runTool(client, 'context_ingest_auto', {
           source_label: 'Demo agent check model extraction',
@@ -246,26 +246,26 @@ export async function runAgentSmoke(options: {
             `${accountName} customer call note: Maya Patel may be the evaluation sponsor. ` +
             'The team wants a security review before expanding the rollout, and the next step is to schedule a technical validation session next Friday.',
         });
-        const rawSource = asRecord(ingestResult.raw_context_source);
+        const source = asRecord(ingestResult.source);
         const extractedCount = Number(
           ingestResult.extracted_count
           ?? ingestResult.entries_created
           ?? ingestResult.signals_created
           ?? 0,
         );
-        const duplicate = Boolean(ingestResult.duplicate_of_raw_context_source_id);
+        const duplicate = Boolean(ingestResult.duplicate_of_source_id);
         modelExtraction = {
           attempted: true,
           extracted_count: extractedCount,
-          raw_context_source_id: typeof rawSource.id === 'string' ? rawSource.id : undefined,
+          source_id: typeof source.id === 'string' ? source.id : undefined,
           duplicate,
         };
         checks.push({
           name: 'context_ingest_auto',
           ok: extractedCount > 0 || duplicate,
           detail: duplicate
-            ? 'Model-backed Raw Context extraction returned an existing idempotent receipt.'
-            : `Model-backed Raw Context extraction produced ${extractedCount} context item(s).`,
+            ? 'Model-backed Source extraction returned an existing idempotent receipt.'
+            : `Model-backed Source extraction produced ${extractedCount} context item(s).`,
           fix: extractedCount > 0 || duplicate
             ? undefined
             : 'Check Workspace Agent model settings, then try a shorter source or run `crmy doctor`.',
@@ -290,7 +290,7 @@ export async function runAgentSmoke(options: {
       detail: signals.length > 0
         ? `Found ${signals.length} Signal(s) needing attention.`
         : 'No Signals needing attention found.',
-      fix: signals.length > 0 ? undefined : 'Run `crmy seed-demo`, or ingest Raw Context that produces reviewable Signals.',
+      fix: signals.length > 0 ? undefined : 'Run `crmy seed-demo`, or ingest a Source that produces reviewable Signals.',
     });
   } catch (err) {
     checks.push({
@@ -386,7 +386,7 @@ export function agentSmokeCommand(): Command {
     .description('Check the seeded demo agent workflow: resolve an account, get a briefing, check Action Context, Signals, and lineage')
     .option('--account <name>', 'Demo account name to resolve', 'Northstar Labs')
     .option('--signal-limit <n>', 'Signals to request from context_signal_group_list', '5')
-    .option('--with-model', 'Also ingest a small Raw Context source through the configured Workspace Agent model')
+    .option('--with-model', 'Also ingest a small Source through the configured Workspace Agent model')
     .option('--config <path>', 'Explicit path to a .crmy.json config file')
     .option('--json', 'Print machine-readable JSON')
     .action(async (opts) => {

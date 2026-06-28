@@ -13,11 +13,11 @@ Scopes decide what an actor **may** use; a **toolset** decides what a single ses
 - Defaults: autonomous **agents → `standard`** (a lean customer-reasoning loop), **humans/admins → `full`**. Operators can override the default with `CRMY_MCP_DEFAULT_TOOLSET`.
 - Every named toolset also includes the core navigation tools (`tool_guide`, `guide_search`, `actor_whoami`, `customer_record_resolve`, `briefing_get`, `action_context_get`, `context_find`) so a session can always orient and discover other toolsets.
 
-Available toolsets: `full`, `standard`, `record_lookup`, `ingest`, `signal_review`, `memory_promotion`, `customer_outreach`, `record_update`, `systems_writeback`, `ops`, `product_knowledge`. Call `tool_guide` to see descriptions and the toolset that matches a workflow.
+Available toolsets: `full`, `standard`, `record_lookup`, `ingest`, `signal_review`, `memory_promotion`, `customer_outreach`, `record_update`, `systems_writeback`, `ops`, `knowledge`, `legacy_workflows`, and `legacy_sequences`. The workflow and sequence toolsets use compatibility names but are treated as opt-in experimental surfaces, not part of the default Core Profile. Call `tool_guide` to see descriptions and the toolset that matches a workflow.
 
 ### tool_guide
 Read-only router for common MCP workflows. Use this when the agent is unsure which CRMy tool path to take.
-- **Input**: `workflow` (`first_steps`, `record_lookup`, `brief_before_action`, `ingest_raw_context`, `review_signals`, `promote_memory`, `customer_outreach`, `record_update`, `systems_writeback`, `post_action_follow_up`, `ops_recovery`)
+- **Input**: `workflow` (`first_steps`, `record_lookup`, `brief_before_action`, `ingest_sources`, `review_signals`, `promote_memory`, `customer_outreach`, `record_update`, `systems_writeback`, `post_action_follow_up`, `ops_recovery`).
 - **Output**: `{ workflow, summary, recommended_tools, avoid_tools, next_step, focus_toolset, how_to_focus_tools, available_toolsets, reminder }`
 
 ### guide_search
@@ -26,29 +26,29 @@ Search the CRMy guide for feature, concept, and workflow documentation.
 - **Output**: `{ sections, available_sections }`
 
 ### knowledge_retrieve
-Retrieve **governed product knowledge** — approved, source-grounded, cited product, pricing, implementation, security, and competitive claims — to ground a customer-facing action. `customer_facing` (default) applies a strict policy: only approved, externally-visible, source-grounded, fresh claims; everything else is reported under `excluded_claims` with a reason. `internal` includes risky claims but labels them in `warnings`. Optional and non-blocking: it never creates Memory or writes to systems of record, and returns a clear `not_configured` status until claims exist. Every retrieval records a receipt for proof/lineage. In the `product_knowledge` and `customer_outreach` toolsets; requires `knowledge:read` (covered by the `read` wildcard). Also available over REST at `POST /api/v1/knowledge/retrieve`. See [Governed Product Knowledge Retrieval](governed-product-knowledge-retrieval.md).
+Retrieve **Trusted Facts**: approved, source-grounded company, product, pricing, implementation, security, and competitive facts that can ground a customer-facing action. `customer_facing` (default) applies a strict policy: only approved, externally-visible, source-grounded, fresh facts; everything else is reported under `excluded_claims` with a reason. `internal` includes risky facts but labels them in `warnings`. Optional and non-blocking: it never creates Memory or writes to systems of record, and returns a clear `not_configured` status until Trusted Facts exist. Every retrieval records a receipt for proof/lineage. In the `knowledge` and `customer_outreach` toolsets; requires `knowledge:read` (covered by the `read` wildcard). Also available over REST at `POST /api/v1/knowledge/retrieve`. See [Governed Knowledge Retrieval](governed-product-knowledge-retrieval.md).
 
-> **Briefing & Action Context auto-enrichment:** `briefing_get` and `action_context_get` include a `product_context` block (a sibling to customer Memory) **by default whenever product knowledge is configured**. Pass `include_product_context: false` to skip it, or `true` to force it. Action Context also adds an informational `product_knowledge` check and `used_knowledge_claim_ids` / `knowledge_retrieval_receipt_ids` proof. This is strictly additive — it never blocks or changes the operating mode.
+> **Briefing & Action Context auto-enrichment:** `briefing_get` and `action_context_get` include a `knowledge` block (a sibling to customer Memory) by default whenever Trusted Facts are configured. Pass `include_knowledge: false` to skip it, or `true` to force it. Action Context also adds an informational `knowledge` check and `used_knowledge_snippet_ids` / `knowledge_retrieval_receipt_ids` proof. This is strictly additive; it never blocks or changes the operating mode.
 - **Input**: `query` (required), `subject_type`, `subject_id`, `audience` (`customer_facing` | `internal`), `proposed_action`, `product_scope`, `competitor`, `persona`, `industry`, `require_approved`, `include_stale`, `limit`
 - **Output**: `{ status, claims[], excluded_claims[], warnings[], retrieval_receipt?, message? }` where `status` is `available` | `no_results` | `degraded` | `not_configured`
 
 ### knowledge_claim_upsert
-**Admin/governance** tool to author or update a product knowledge claim envelope (capability, proof point, pricing, implementation, security, or competitive response). Provide `source_text` so CRMy can verify the claim is **grounded** in its source — customer-facing eligibility requires grounding plus `approval_status: approved`, `approved_for_external_use`, `visibility: external`, and freshness. Re-upserts by `external_key` update in place. Authors governed product truth; does not touch customer Memory. Admin-only; requires `knowledge:write`.
+**Admin/governance** tool to author or update a Trusted Fact (capability, proof point, pricing, implementation, security, or competitive response). Provide `source_text` so CRMy can verify the fact is **grounded** in its source. Customer-facing eligibility requires grounding plus `approval_status: approved`, `approved_for_external_use`, `visibility: external`, and freshness. Re-upserts by `external_key` update in place. Authors governed facts; does not touch customer Memory. Admin-only; requires `knowledge:write`.
 - **Input**: `category` (required), `title` (required), `body` (required), `summary`, `source_text`, `external_key`, `product_scope[]`, `competitors[]`, `personas[]`, `industries[]`, `source_ref`/`source_url`/`source_label`/`source_version`, `confidence`, `source_priority`, `approval_status`, `approved_for_external_use`, `visibility`, `status`, `effective_at`, `valid_until`, `idempotency_key`
 - **Output**: the stored `KnowledgeClaim` (including the computed `grounded` flag)
 
 ### knowledge_claim_list
-**Admin/governance** tool to list product knowledge claim envelopes for review. Use it to find pending, stale, conflicting, rejected, deprecated, or assigned claims without exposing full claim bodies in customer-facing packets. Admin-only; requires `knowledge:read`.
+**Admin/governance** tool to list Trusted Facts for review. Use it to find pending, stale, conflicting, rejected, deprecated, or assigned facts without exposing full bodies in customer-facing packets. Admin-only; requires `knowledge:read`.
 - **Input**: `status`, `approval_status`, `needs_review`, `review_owner_id`, `query`, `limit`
 - **Output**: `{ claims, count }`
 
 ### knowledge_claim_review
-**Admin/governance** tool to apply a review decision to a product knowledge claim. `approve` re-verifies freshness and can set external-use eligibility; `reject` retires the claim; `deprecate` removes it from live use; `mark_stale` forces review; `reactivate` restores stale/deprecated claims. Admin-only; requires `knowledge:write`.
+**Admin/governance** tool to apply a review decision to a Trusted Fact. `approve` re-verifies freshness and can set external-use eligibility; `reject` retires the fact; `deprecate` removes it from live use; `mark_stale` forces review; `reactivate` restores stale/deprecated facts. Admin-only; requires `knowledge:write`.
 - **Input**: `id` (required), `decision` (`approve` | `reject` | `deprecate` | `mark_stale` | `reactivate`, required), `approved_for_external_use`, `review_owner_id`, `idempotency_key`
 - **Output**: the updated `KnowledgeClaimRecord`, or `{ error, message }` if the claim is not found
 
 ### knowledge_conflicts_detect
-**Admin/governance** tool to detect competing product claims in the same category and recommend source-priority resolution. With `apply=true`, CRMy marks the lower-priority resolvable claim as `conflicting` so it stops flowing into customer-facing retrieval until reviewed. Admin-only; requires `knowledge:write` because the same surface can apply status changes.
+**Admin/governance** tool to detect competing Trusted Facts in the same category and recommend source-priority resolution. With `apply=true`, CRMy marks the lower-priority resolvable fact as `conflicting` so it stops flowing into customer-facing retrieval until reviewed. Admin-only; requires `knowledge:write` because the same surface can apply status changes.
 - **Input**: `category`, `competitor`, `apply`, `limit`, `idempotency_key`
 - **Output**: `{ conflicts, applied }`
 
@@ -58,7 +58,7 @@ Common safe paths:
 - **Raw notes/transcripts/email/research**: `context_ingest_auto` when IDs are unknown, `context_ingest` when subject IDs are known
 - **Before customer-facing action**: `action_context_get` with `proposed_action`
 - **When Action Context requires review**: `action_context_request_human_unblock`
-- **After sends, approvals, writebacks, assignments, workflows, or sequences**: `context_lineage_get` and inspect `outcomes` before dependent follow-up
+- **After sends, approvals, writebacks, assignments, or experimental workflow/sequence activity**: `context_lineage_get` and inspect `outcomes` before dependent follow-up
 - **Signal review**: `context_find` with `mode="signals"` → `context_signal_group_get` → complete details, handoff, reject, or promote
 - **Operator recovery**: `ops_status_get` or `ops_data_quality_get` first; keep repair tools at `dry_run=true` until confirmed
 
@@ -221,7 +221,7 @@ Update an activity.
 - **Output**: `{ activity, event_id }`
 
 ### Transcript & notes drop tools
-Use these when transcripts or raw notes are exported to a storage location rather than sent inline through `context_ingest_auto`.
+Use these when transcripts or source notes are exported to a storage location rather than sent inline through `context_ingest_auto`.
 
 Admin tools:
 - `context_source_connection_list`
@@ -237,7 +237,7 @@ Review/processing tools:
 - `context_source_object_reprocess`
 - `context_source_object_ignore`
 
-Supported providers are `s3` and `local_folder`. S3 credentials are encrypted and write-only. Local folders are intended for local/self-hosted installs and must be inside `CRMY_LOCAL_SOURCE_ROOTS`. Unmatched or ambiguous source objects create Handoffs and appear in Customer Activity Needs Context; resolving an object links it to a meeting or customer record and queues processing into Raw Context, Signals, Memory, and Lineage.
+Supported providers are `s3` and `local_folder`. S3 credentials are encrypted and write-only. Local folders are intended for local/self-hosted installs and must be inside `CRMY_LOCAL_SOURCE_ROOTS`. Unmatched or ambiguous source objects create Handoffs and appear in Customer Activity Needs Context; resolving an object links it to a meeting or customer record and queues Source extraction into Signals, Memory, and Lineage.
 
 ## Assignment Tools
 
@@ -447,13 +447,13 @@ Retry, park, or mark failed a durable async job with an audit entry.
 - **Output**: `{ queue_name, job_id, action, previous_status, new_status, recovered, recovered_at }`
 
 ### ops_data_quality_get ★ 0.7+
-Run data-quality checks for malformed lifecycle/stage values, missing canonical subjects, orphaned actor links, missing search-index rows, stuck context indexing work, stale Raw Context processing receipts, retryable Raw Context failures, and stuck Raw Context extraction attempts.
+Run data-quality checks for malformed lifecycle/stage values, missing canonical subjects, orphaned actor links, missing search-index rows, stuck context indexing work, stale Source processing receipts, retryable Source failures, and stuck Source extraction attempts.
 - **Input**: `sample_limit`, `include_clean`
 - **Output**: `{ generated_at, checks, summary }`
 
 ### ops_data_quality_repair ★ 0.7+
 Repair only deterministic, low-risk data-quality findings. Defaults to dry run.
-- **Input**: `check_name` (`activities_missing_canonical_subject`|`current_context_missing_search_index`|`stuck_context_outbox_processing`|`stale_raw_context_sources_processing`|`stuck_raw_context_extraction_attempts_running`|`failed_raw_context_sources_retryable`|`stuck_agent_turns_running`), `dry_run`, `limit`
+- **Input**: `check_name` (`activities_missing_canonical_subject`|`current_context_missing_search_index`|`stuck_context_outbox_processing`|`stale_sources_processing`|`stuck_source_extraction_attempts_running`|`failed_sources_retryable`|`stuck_agent_turns_running`), `dry_run`, `limit`
 - **Output**: `{ check_name, dry_run, action, repaired_count, event_id? }`
 
 ### ops_audit_get ★ 0.7+
@@ -578,7 +578,7 @@ Start Google or Microsoft calendar OAuth for the current human-linked actor with
 - **Output**: `{ connection, auth_url, oauth_ready, setup_check, status, message }`
 
 ### email_draft_preview
-Generate a customer email draft preview from Memory, Signals, source email, linked records, and selected sender identity. When product knowledge is configured, the draft is grounded in **approved, cited product claims** (and instructed to avoid excluded ones); `model_metadata` records `used_knowledge_claim_ids`, `knowledge_retrieval_receipt_ids`, and `knowledge_citations`, and `context_used.product_knowledge` summarizes what was used.
+Generate a customer email draft preview from Memory, Signals, source email, linked records, and selected sender identity. When Trusted Facts are configured, the draft is grounded in **approved, cited Trusted Facts** and instructed to avoid excluded ones; `model_metadata` records `used_knowledge_snippet_ids`, `knowledge_retrieval_receipt_ids`, and `knowledge_citations`, and `context_used.knowledge` summarizes what was used.
 - **Input**: `source_email_message_id`, `subject_type`, `subject_id`, `contact_id`, `account_id`, `opportunity_id`, `use_case_id`, `to_address`, `to_name`, `intent`, `instruction`, `tone`, `target`
 - **Output**: `{ subject, body_text, sender, context_used, warnings, model_metadata }`
 
@@ -602,7 +602,7 @@ Resolve GTM/customer references across accounts, contacts, opportunities, and us
   - `proposed_records`: possible new contacts/accounts/opportunities/use cases that need review; CRMy does not create them automatically
   - `account_scope`: the account-level directory CRMy checked before linking child records
 
-This tool shares the same account-first resolver used by Raw Context extraction. Opportunities and use cases should usually resolve inside a matched account. If CRMy is not sure, it returns an ambiguity receipt or reviewed proposal instead of guessing.
+This tool shares the same account-first resolver used by Source extraction. Opportunities and use cases should usually resolve inside a matched account. If CRMy is not sure, it returns an ambiguity receipt or reviewed proposal instead of guessing.
 
 For messy meeting transcripts, email threads, notes, research, or any source that should become Signals and Memory, call `context_ingest_auto` instead of trying to resolve every mention manually.
 
@@ -671,12 +671,12 @@ Approve or reject a request.
 Use these tools with the Active Context / Memory distinction in mind:
 
 - **Retrieval tools** load persistent Memory and related customer state into the model's temporary Active Context: `action_context_get`, `briefing_get`, `context_find`, `context_get`, and, for specialized cases, `context_search`, `context_semantic_search`, `context_list`, `context_lineage_get`, and `context_diff`.
-- **Ingestion tools** accept Raw Context and let CRMy extract evidence-backed Signals: `context_ingest_auto`, `context_ingest`, and `context_extract`.
+- **Ingestion tools** accept source material and let CRMy extract evidence-backed Signals: `context_ingest_auto`, `context_ingest`, and `context_extract`.
 - **Promotion tools** turn confirmed Signals into Current Memory: `context_signal_group_promote` and `context_signal_promote`.
 - **Governance tools** keep Memory safe to act on: Handoff, stale review, rejection, supersession, and review tools.
 
 ### context_add
-Advanced direct write for Current Memory or an evidence-backed Signal about a customer record. For raw transcripts, emails, meeting notes, research, or other messy input, use `context_ingest_auto` or `context_ingest` so CRMy records Raw Context, extracts Signals, and promotes high-confidence Memory.
+Advanced direct write for Current Memory or an evidence-backed Signal about a customer record. For transcripts, emails, meeting notes, research, or other messy input, use `context_ingest_auto` or `context_ingest` so CRMy records a Source, extracts Signals, and promotes high-confidence Memory.
 - **Input**: `subject_type` (required), `subject_id` (required), `context_type` (required), `body` (required), `title`, `confidence` (0.0–1.0), `memory_status`, `evidence`, `tags`, `valid_until`, `structured_data`, `source_activity_id`, `source`, `source_ref`
 - **Output**: `{ context_entry, event_id, validation_warnings? }`
 - **Lifecycle**: `active` is Current Memory. `signal` is inferred context and requires evidence. Memory past `valid_until` needs review before agents rely on it. Use `context_review` to reconfirm, `context_signal_reject` to dismiss Signals, and `context_supersede` for `superseded` states instead of creating those states directly.
@@ -702,16 +702,16 @@ Specific/advanced listing tool for Current Memory or Signals with filters. Prefe
 - **Output**: `{ context_entries, next_cursor, total }`
 - **Note**: `structured_data_filter` is a JSONB containment filter — e.g. `{ "status": "open" }` finds entries whose `structured_data` contains that key/value pair.
 
-### context_raw_source_list
-List Raw Context processing records.
+### context_source_list
+List Source processing records.
 - **Input**: `source_type`, `status`, `subject_type`, `subject_id`, `limit`, `cursor`
-- **Output**: `{ raw_context_sources, next_cursor, total }`
+- **Output**: `{ sources, next_cursor, total }`
 - **Use when**: an agent needs to explain where context came from, whether ingestion succeeded, how many Signals or Memory entries were produced, or why a source failed/skipped.
 
-### context_raw_source_get
-Get one Raw Context processing record.
+### context_source_get
+Get one Source processing record.
 - **Input**: `id` (required)
-- **Output**: `{ raw_context_source }`
+- **Output**: `{ source }`
 
 ### context_search
 Specific/advanced full-text search across Memory by default using PostgreSQL GIN index. Prefer `context_find` with `mode="search"` for ordinary keyword search.
@@ -737,8 +737,8 @@ Add missing typed Signal detail and recompute readiness before confirmation.
 - **Boundary**: updates only unconfirmed Signal structured data. It does not edit CRM records, promote Memory, create activities, or execute writebacks.
 
 ### context_lineage_get
-Trace Raw Context through Signals, Memory, Active Context retrievals, Handoffs, governed writebacks, and audit events.
-- **Input**: one of `subject_type` + `subject_id`, `context_entry_id`, `signal_group_id`, or `raw_context_source_id`
+Trace Sources through Signals, Memory, Active Context retrievals, Handoffs, governed writebacks, and audit events.
+- **Input**: one of `subject_type` + `subject_id`, `context_entry_id`, `signal_group_id`, or `source_id`
 - **Output**: `{ lineage: { nodes, edges, outcomes, summary } }`
 - **Use when**: an agent needs to explain why a Memory exists, what evidence supports it, whether Action Context was assembled before action, whether a human reviewed it, or whether it produced a system-of-record writeback.
 - **Outcomes**: summarizes recent downstream action results, pending human/writeback work, failed side effects, completed counts, and recommended follow-up so agents can continue safely after an action.
@@ -801,12 +801,12 @@ Catch-up diff for a customer record — shows what changed since a given timesta
 - **Note**: CRMy caps each bucket independently. If `summary.truncated` marks a bucket true, narrow `since` or fetch specific entries before relying on the diff as complete.
 
 ### context_ingest
-Ingest Raw Context (transcript, email, meeting notes, etc.) and auto-extract structured Signals. Creates an activity as provenance and runs the full extraction pipeline.
+Ingest a Source (transcript, email, meeting notes, etc.) and auto-extract structured Signals. Creates an activity as provenance and runs the full extraction pipeline.
 - **Input**: `subject_type` (required), `subject_id` (required), `document` (required), `source_label`
-- **Output**: `{ extracted_count, memory_created, signals_created, skipped, signals, memory_entries, context_entries, activity_id, raw_context_source, processing_receipt }`
+- **Output**: `{ extracted_count, memory_created, signals_created, skipped, signals, memory_entries, context_entries, activity_id, source, processing_receipt }`
 
 ### context_ingest_auto
-Ingest Raw Context and automatically resolve mentioned contacts/accounts before extraction. Requires the configured Workspace Agent: the model identifies likely people and accounts, then CRMy grounds them against existing records before creating Signals or Memory.
+Ingest a Source and automatically resolve mentioned contacts/accounts before extraction. Requires the configured Workspace Agent: the model identifies likely people and accounts, then CRMy grounds them against existing records before creating Signals or Memory.
 - **Input**: `document` (required), `source_label`, `context_type`, `confidence_threshold`
 - **Output**: `{ subjects_resolved, entries_created, memory_created, signals_created, skipped, processing_receipts, low_confidence_skipped }`
 
@@ -837,7 +837,7 @@ Assemble action-aware customer context before an agent prepares work. This is an
 - **Readiness states**: `ready`, `review_needed`, or `blocked`
 - **Operating modes**: use the readiness and checks as `inform` for low-risk work, `warn` when stale/inferred/conflicting context should be visible but not blocking, and `require_review` when execution needs human approval.
 - **Handoffs**: `required_handoffs` contains execution-blocking review work. Non-blocking stale Memory, unconfirmed Signals, and open-work warnings remain in `guidance.warning_reasons` and `checks`.
-- **Low-friction examples**: briefing, search, summarization, internal notes, draft preparation, Raw Context ingest, and reviewable Signal creation should generally remain fast.
+- **Low-friction examples**: briefing, search, summarization, internal notes, draft preparation, Source ingest, and reviewable Signal creation should generally remain fast.
 - **Review examples**: automatic customer email send, sequence send, workflow-triggered outreach, forecast/stage/amount/owner changes, external writeback, external commitments, out-of-scope records, or using unconfirmed Signals as fact should require review when policy or risk says so.
 - **Proof**: when `emit_retrieval_event` is true, CRMy records an `action_context.retrieved` event with compact metadata: context IDs, Signal group IDs, stale count, contradiction count, readiness status, risk level, and proposed action type.
 - **Boundary**: this tool does not create activities, promote Memory, update records, create handoffs, or execute writebacks. It only assesses readiness and records retrieval proof. When it returns `human_unblock.required`, call `action_context_request_human_unblock` to create the tracked human decision.
@@ -943,7 +943,7 @@ Delete a mapping when it should no longer sync or govern writebacks.
 - **Output**: `{ deleted, event_id }`
 
 ### sor_sync_run
-Run a sync. Synced changes emit normal CRMy events with source metadata for Automations, Sequences, audit, and context extraction.
+Run a sync. Synced changes emit normal CRMy events with source metadata for audit, context extraction, HITL, and experimental event handlers.
 - **Input**: `system_id` (required), `mapping_id`, `mode`
 - **Output**: `{ run }`
 

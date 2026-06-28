@@ -31,7 +31,7 @@ function printProcessingReceipt(data: Record<string, unknown>): void {
   console.log(`  Memory created:  ${data.memory_created ?? 0}`);
   console.log(`  Signals created: ${data.signals_created ?? 0}`);
   console.log(`  Skipped:         ${data.skipped ?? 0}`);
-  if (receipt?.raw_context_source_id) console.log(`  Raw Context:     ${receipt.raw_context_source_id}`);
+  if (receipt?.source_id) console.log(`  Source:          ${receipt.source_id}`);
   if (receipt?.status) console.log(`  Status:          ${receipt.status}`);
   if (receipt?.next_action) console.log(`  Next:            ${receipt.next_action}`);
   console.log('');
@@ -89,18 +89,18 @@ async function resolveContextEntryRef(client: Awaited<ReturnType<typeof getClien
   });
 }
 
-async function resolveRawSourceRef(client: Awaited<ReturnType<typeof getClient>>, ref: string): Promise<string> {
+async function resolveSourceRef(client: Awaited<ReturnType<typeof getClient>>, ref: string): Promise<string> {
   return resolveShortId(client, ref, {
-    label: 'Raw Context source',
-    listTool: 'context_raw_source_list',
+    label: 'Source',
+    listTool: 'context_source_list',
     listInput: { limit: 100 },
-    responseKeys: ['raw_context_sources', 'data'],
-    helpCommand: 'crmy context raw-sources',
+    responseKeys: ['data'],
+    helpCommand: 'crmy context sources',
   });
 }
 
 export function contextCommand(): Command {
-  const cmd = new Command('context').description('Manage Raw Context, Signals, and Memory');
+  const cmd = new Command('context').description('Manage Sources, Signals, and Memory');
 
   cmd.command('list')
     .description('List confirmed Memory and reviewable Signals')
@@ -130,7 +130,7 @@ export function contextCommand(): Command {
     .description('Advanced: write confirmed Memory or an evidence-backed Signal directly')
     .action(async () => {
       const { default: inquirer } = await import('inquirer');
-      console.log('\n  For transcripts, emails, notes, or research, use `crmy context ingest` so CRMy creates Raw Context, extracts Signals, and promotes high-confidence Memory.\n');
+      console.log('\n  For transcripts, emails, notes, or research, use `crmy context ingest` so CRMy saves a Source, extracts Signals, and promotes high-confidence Memory.\n');
       const answers = await inquirer.prompt([
         { type: 'input', name: 'subject_ref', message: 'Subject (type:name or type:id):', default: 'account:' },
         { type: 'list', name: 'context_type', message: 'Context type:', choices: ['note', 'transcript', 'summary', 'research', 'preference', 'objection', 'competitive_intel', 'relationship_map', 'meeting_notes', 'agent_reasoning'] },
@@ -163,7 +163,7 @@ export function contextCommand(): Command {
     });
 
   cmd.command('ingest')
-    .description('Add messy Raw Context and let CRMy extract Signals and Memory')
+    .description('Add source material and let CRMy extract Signals and Memory')
     .option('-f, --file <path>', 'Read source text from a file')
     .option('--subject <type:name|type:id>', 'Known subject to attach to, such as account:Northstar Labs')
     .option('--source <label>', 'Human-readable source label')
@@ -185,8 +185,8 @@ export function contextCommand(): Command {
       const toolName = opts.auto || !subject.subject_type ? 'context_ingest_auto' : 'context_ingest';
       const spinner = createSpinner(
         toolName === 'context_ingest_auto'
-          ? 'Resolving subjects and extracting Raw Context with the Workspace Agent...'
-          : 'Extracting Raw Context with the Workspace Agent...',
+          ? 'Resolving subjects and extracting Sources with the Workspace Agent...'
+          : 'Extracting Sources with the Workspace Agent...',
       );
       let data: Record<string, unknown>;
       try {
@@ -200,9 +200,9 @@ export function contextCommand(): Command {
           confidence_threshold: parseFloat(opts.threshold),
         });
         data = JSON.parse(result);
-        spinner.succeed('Raw Context extraction complete');
+        spinner.succeed('Source extraction complete');
       } catch (err) {
-        spinner.fail('Raw Context extraction failed');
+        spinner.fail('Source extraction failed');
         await client.close();
         throw err;
       }
@@ -329,8 +329,8 @@ export function contextCommand(): Command {
       await client.close();
     });
 
-  cmd.command('raw-sources')
-    .description('List Raw Context processing records')
+  cmd.command('sources')
+    .description('List Source processing records')
     .option('--source-type <type>', 'Filter by source type, such as activity, add_context, mcp, context_api')
     .option('--status <status>', 'Filter by status (processed, needs_review, failed, skipped)')
     .option('--subject <type:name|type:id>', 'Filter by subject')
@@ -339,7 +339,7 @@ export function contextCommand(): Command {
       const client = await getClient();
       const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
       const limit = parseInt(opts.limit, 10);
-      const result = await client.call('context_raw_source_list', {
+      const result = await client.call('context_source_list', {
         source_type: opts.sourceType,
         status: opts.status,
         subject_type: subject.subject_type,
@@ -347,9 +347,9 @@ export function contextCommand(): Command {
         limit,
       });
       const data = JSON.parse(result);
-      const sources = data.raw_context_sources ?? data.data ?? [];
+      const sources = data.data ?? [];
       if (sources.length === 0) {
-        console.log('No Raw Context sources found.');
+        console.log('No Sources found.');
       } else {
         console.table(sources.map((s: Record<string, unknown>) => ({
           id: (s.id as string).slice(0, 8),
@@ -366,45 +366,45 @@ export function contextCommand(): Command {
       await client.close();
     });
 
-  cmd.command('raw-source <id>')
-    .description('Show one Raw Context processing record')
+  cmd.command('source <id>')
+    .description('Show one Source processing record')
     .action(async (id) => {
       const client = await getClient();
-      const sourceId = await resolveRawSourceRef(client, id);
-      const result = await client.call('context_raw_source_get', { id: sourceId });
+      const sourceId = await resolveSourceRef(client, id);
+      const result = await client.call('context_source_get', { id: sourceId });
       console.log(JSON.parse(result));
       await client.close();
     });
 
   cmd.command('reprocess-source <id>')
-    .description('Reprocess a Raw Context source')
+    .description('Reprocess a Source')
     .action(async (id) => {
       const client = await getClient();
-      const sourceId = await resolveRawSourceRef(client, id);
-      const result = await client.call('context_raw_source_reprocess', { id: sourceId });
+      const sourceId = await resolveSourceRef(client, id);
+      const result = await client.call('context_source_reprocess', { id: sourceId });
       const data = JSON.parse(result);
       printProcessingReceipt(data);
       await client.close();
     });
 
   cmd.command('lineage')
-    .description('Trace Raw Context to Signals, Memory, Handoffs, writebacks, and audit')
+    .description('Trace Sources to Signals, Memory, Handoffs, writebacks, and audit')
     .option('--subject <type:name|type:id>', 'Subject such as account:Northstar Labs')
     .option('--entry <id>', 'Context entry / Memory ID')
     .option('--signal <id>', 'Signal ID')
-    .option('--raw-source <id>', 'Raw Context source ID')
+    .option('--source <id>', 'Source ID')
     .action(async (opts) => {
       const client = await getClient();
       const entryId = opts.entry ? await resolveContextEntryRef(client, opts.entry) : undefined;
       const signalGroupId = opts.signal ? await resolveSignalGroupRef(client, opts.signal) : undefined;
-      const rawSourceId = opts.rawSource ? await resolveRawSourceRef(client, opts.rawSource) : undefined;
+      const sourceId = opts.source ? await resolveSourceRef(client, opts.source) : undefined;
       const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
       const result = await client.call('context_lineage_get', {
         subject_type: subject.subject_type,
         subject_id: subject.subject_id,
         context_entry_id: entryId,
         signal_group_id: signalGroupId,
-        raw_context_source_id: rawSourceId,
+        source_id: sourceId,
       });
       const data = JSON.parse(result);
       const lineage = data.lineage ?? data;

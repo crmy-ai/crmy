@@ -19,7 +19,7 @@ CRMy should be able to answer, with evidence:
 The 0.9 line made the source-to-action loop durable:
 
 ```text
-Raw Context -> Signals -> Memory -> Briefing / Action Context -> Handoff / Writeback -> Proof
+Sources -> Signals -> Memory -> Briefing / Action Context -> Handoff / Writeback -> Proof
 ```
 
 The current codebase already has strong internal checks for parsing, idempotency, scoped access, signal readiness, duplicate-source protection, Action Context propagation, and writeback receipts. Those tests are necessary, but they are mostly engineering guarantees.
@@ -39,7 +39,7 @@ offline regression cases.
 | Layer | Existing state | 0.9.3 addition |
 |---|---|---|
 | Unit and durability tests | Verify invariants and known bug regressions. | Keep them as release gates. |
-| Golden corpora | Cover Raw Context extraction and record resolution. | Wrap them in `crmy eval run` with explicit metric output. |
+| Golden corpora | Cover Source extraction and record resolution. | Wrap them in `crmy eval run` with explicit metric output. |
 | Agent smoke | Proves a seeded happy path works. | Add scenario-level scoring, traces, and failure reasons. |
 | Connector tests | Validate adapter behavior and writeback safeguards. | Add provider certification eval suites and repeatable run reports. |
 | Lineage/audit checks | Prove receipts are emitted. | Grade proof completeness and source attribution quality. |
@@ -75,9 +75,9 @@ Goals:
 
 Companion 0.9.3 workstream:
 
-- [Governed Product Knowledge Retrieval](governed-product-knowledge-retrieval.md) should ship as an optional sibling retrieval layer for product, solution, pricing, implementation, security, compliance, roadmap, and competitive claims.
-- The eval harness should include or be ready to include product-knowledge cases for claim freshness, approval filtering, external-use visibility, citation support, customer-facing draft safety, and retrieval receipt completeness.
-- Product knowledge evals should preserve the distinction between customer Memory and global product truth instead of collapsing both into one generic RAG context array.
+- [Governed Knowledge Retrieval](governed-product-knowledge-retrieval.md) should ship as an optional sibling retrieval layer for product, solution, pricing, implementation, security, compliance, roadmap, company, and competitive Trusted Facts.
+- The eval harness should include or be ready to include knowledge cases for Trusted Fact freshness, approval filtering, external-use visibility, citation support, customer-facing draft safety, and retrieval receipt completeness.
+- Product knowledge evals should preserve the distinction between customer Memory and Trusted Facts instead of collapsing both into one generic RAG context array.
 
 Non-goals for 0.9.3:
 
@@ -222,7 +222,7 @@ Illustrative result shape:
 
 ## Suites
 
-### 1. Raw Context Extraction
+### 1. Source Extraction
 
 Purpose: prove messy customer source material becomes reviewable Signals, proposed records, no-context receipts, or failures with actionable reasons.
 
@@ -230,7 +230,7 @@ Targets:
 
 - `context_ingest_auto`
 - `context_ingest`
-- `context_raw_source_reprocess`
+- `context_source_reprocess`
 - extraction parser and repair paths
 - Signal grouping
 - Memory readiness
@@ -272,7 +272,7 @@ Initial implementation:
   same messy corpus as gold labels, seeds an eval activity database, calls
   production `extractContextFromActivity` without `modelOutputOverride`, and
   scores persisted Signals, proposed records, evidence, extraction attempts,
-  and Raw Context receipts.
+  and Source receipts.
 - Injected test callers substitute only the LLM response at the provider seam.
   Live eval runs without an injected caller use the tenant `callLLM` path with
   `CRMY_EVAL_MODEL_*` config loaded into the eval DB.
@@ -296,7 +296,7 @@ Targets:
 - `customer_record_resolve`
 - `entity_resolve`
 - Subject Graph resolver
-- Raw Context subject detection
+- Source subject detection
 - Customer Email and Customer Activity association
 
 Metrics:
@@ -352,7 +352,7 @@ Metric definitions:
 - `irrelevant_context_rate`: returned entries marked irrelevant for the case divided by returned entries.
 - `critical_omission_count`: required context claims absent from the briefing or Action Context packet.
 - `token_packing_efficiency`: required or useful context tokens divided by total estimated retrieved tokens.
-- `scope_leak_count`: returned records, context entries, evidence, or raw-source references outside the actor's visible scope.
+- `scope_leak_count`: returned records, context entries, evidence, or Source references outside the actor's visible scope.
 
 Release gate:
 
@@ -473,7 +473,7 @@ Release gate:
 
 - Customer-facing drafts do not include unsupported factual claims.
 - Source posture warnings appear when evidence is internal, seller-authored, weak, stale, or unknown.
-- Lineage connects Raw Context, Signals, Memory, Active Context retrieval, Handoffs, actions, writebacks, and audit for first-class workflows.
+- Lineage connects Sources, Signals, Memory, Active Context retrieval, Handoffs, actions, writebacks, and audit for first-class workflows.
 
 ### 7. Agent Trajectory
 
@@ -813,7 +813,7 @@ Candidate online signals:
 - Handoff reviewer rejects due to missing evidence.
 - Writeback preview blocked by source authority.
 - Customer record was resolved incorrectly and manually relinked.
-- Raw Context extraction was dismissed as wrong.
+- Source extraction was dismissed as wrong.
 - Signal was confirmed after detail completion, suggesting a missing extraction field.
 
 ## Data Privacy And Redaction
@@ -875,7 +875,7 @@ Recommended release gates:
 
 | Gate | Target |
 |---|---|
-| Raw Context corpus | 100% deterministic pass. |
+| Source corpus | 100% deterministic pass. |
 | Record resolution corpus | 100% deterministic pass. |
 | Live extraction parse success | 100% when `--require-live` is used. |
 | Live extraction expected Signal recall | At least 0.85 when `--require-live` is used. |
@@ -899,7 +899,7 @@ Status: **Implemented foundation.**
 - Add local artifact writer.
 - Add deterministic graders.
 - Add `crmy eval list`, `crmy eval describe`, and `crmy eval run`.
-- Convert Raw Context and record-resolution corpora into eval suites.
+- Convert Source and record-resolution corpora into eval suites.
 - Add `raw_context_extraction_quality` as a live-model suite that calls the
   production activity extraction path through an eval fixture DB.
 

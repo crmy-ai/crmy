@@ -26,6 +26,7 @@ export const writebackMode = z.enum(['append_event', 'mapped_upsert', 'stored_pr
 export const sourceAuthority = z.enum(['crmy', 'external', 'bidirectional', 'read_only', 'approval_required']);
 export const externalObjectType = z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case', 'context_entry']);
 export const memoryStatus = z.enum(['signal', 'active', 'rejected', 'superseded']);
+export const contextGroundingMethod = z.enum(['lexical', 'corroborated', 'human_reviewed']);
 export const tokenBudgetProfile = z.enum(['tiny', 'standard', 'deep', 'evidence_heavy']);
 export const evidenceMode = z.enum(['summary', 'full', 'none']);
 export const signalReadinessStatus = z.enum([
@@ -1548,8 +1549,8 @@ export const briefingGet = z.object({
     .describe('Named token budget preset. Explicit token_budget wins when both are supplied.'),
   evidence_mode: evidenceMode.default('summary')
     .describe('summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.'),
-  include_product_context: z.boolean().optional()
-    .describe('Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing.'),
+  include_knowledge: z.boolean().optional()
+    .describe('Include Trusted Facts relevant to this subject. Defaults to true when Trusted Facts are configured; never blocks the briefing.'),
 });
 
 export const actionContextProposedAction = z.object({
@@ -1588,8 +1589,8 @@ export const actionContextGet = z.object({
     .describe('summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.'),
   emit_retrieval_event: z.boolean().default(true),
   proposed_action: actionContextProposedAction.optional(),
-  include_product_context: z.boolean().optional()
-    .describe('Include governed product knowledge in the assembled briefing. Defaults to true when product knowledge is configured.'),
+  include_knowledge: z.boolean().optional()
+    .describe('Include Trusted Facts in the assembled briefing. Defaults to true when Trusted Facts are configured.'),
 });
 
 export const actionContextHumanUnblock = z.object({
@@ -1670,7 +1671,7 @@ export const contextLineageGet = z.object({
   subject_id: uuid.optional(),
   context_entry_id: uuid.optional(),
   signal_group_id: uuid.optional(),
-  raw_context_source_id: uuid.optional(),
+  source_id: uuid.optional(),
 });
 
 // -- Context review schema --
@@ -1975,7 +1976,7 @@ export const contextIngest = z.object({
   idempotency_key: idempotencyKey,
 });
 
-/** Governed product knowledge retrieval request (optional, non-blocking). */
+/** Trusted Fact retrieval request (optional, non-blocking). */
 export const knowledgeRetrieve = z.object({
   query: z.string().min(1).describe('What product/competitive context the agent needs for this customer action.'),
   subject_type: subjectType.optional().describe('Optional customer subject to tailor relevance.'),
@@ -1992,7 +1993,7 @@ export const knowledgeRetrieve = z.object({
   limit: z.number().int().min(1).max(50).optional().default(8),
 });
 
-/** Admin/governance write path for a product knowledge claim envelope. */
+/** Admin/governance write path for a Trusted Fact envelope. */
 export const knowledgeClaimUpsert = z.object({
   idempotency_key: idempotencyKey,
   external_key: z.string().max(256).optional().describe('Stable dedupe key from the source; re-upserts update in place.'),
@@ -2047,7 +2048,7 @@ export const knowledgeClaimReview = z.object({
   idempotency_key: idempotencyKey,
 });
 
-/** Governance: detect competing product claims with source-priority resolution (Phase 7). */
+/** Governance: detect competing Trusted Facts with source-priority resolution (Phase 7). */
 export const knowledgeConflictsDetect = z.object({
   idempotency_key: idempotencyKey,
   category: z.string().optional().describe('Limit detection to a single claim category.'),

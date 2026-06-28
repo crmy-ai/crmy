@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Governed Product Knowledge — Phase 6: source freshness & deprecation handling.
+ * Trusted Facts — Phase 6: source freshness & deprecation handling.
  *
  * Product/competitive truth changes fast, so a claim that was approved months
  * ago should not silently keep flowing into customer-facing drafts. This sweep
@@ -94,16 +94,16 @@ export async function sweepTenantKnowledgeFreshness(
 }
 
 /**
- * Background sweep across all tenants with active product claims. Returns the
- * number of claims demoted to stale. Best-effort: a per-tenant failure is logged
- * and does not stop the sweep (product knowledge is optional and non-blocking).
+ * Background sweep across all tenants with active Trusted Facts. Returns the
+ * number of snippets demoted to stale. Best-effort: a per-tenant failure is logged
+ * and does not stop the sweep (Trusted Facts are optional and non-blocking).
  */
 export async function sweepKnowledgeFreshness(db: DbPool): Promise<number> {
   let tenants: string[];
   try {
     tenants = await listTenantsWithActiveClaims(db);
   } catch {
-    // Table missing / product knowledge never configured — nothing to sweep.
+    // Table missing / Trusted Facts never configured: nothing to sweep.
     return 0;
   }
   let marked = 0;

@@ -1,71 +1,65 @@
-# CRMy v0.9.3
+# CRMy v0.9.4
 
-CRMy v0.9.3 is the eval, governed product knowledge, and release-certification hardening release. It makes CRMy more measurable for agent builders, adds an optional governed product-knowledge layer for customer-facing actions, and closes several production-readiness gaps found during the 0.9.3 audit.
+CRMy v0.9.4 is a production-readiness hardening release for governed customer context. It tightens browser and API-key trust boundaries, aligns agent-facing briefings with Trusted Facts, narrows Knowledge Source setup to MCP, and marks automation and sequence surfaces as controlled experiments.
 
-This release keeps the central loop intact: messy customer context and approved product knowledge stay governed, Signals remain evidence-backed, Memory is promoted only when grounded and ready, and agents get compact Action Context before acting.
+This release keeps the central loop intact: messy customer context and approved Trusted Facts stay governed, Signals remain evidence-backed, Memory is promoted only when grounded and ready, and agents get compact Action Context before acting.
 
 ## Release Focus
 
-v0.9.3 focuses on proof, governance, and operator confidence:
+v0.9.4 focuses on trust-boundary cleanup, surface consistency, and operator confidence:
 
-- add local-first eval harnesses for extraction quality, retrieval, source attribution, tool choice, Action Context, and agent trajectory smoke checks;
-- add governed Product Knowledge retrieval, receipts, briefing/Action Context/email grounding, CLI, and admin review controls for product, security, pricing, implementation, roadmap, and competitive claims;
-- ground customer-facing email drafts in approved product claims with citations and exclusion warnings;
-- make MCP sessions configurable by toolset so autonomous agents can start with a leaner, safer catalog;
-- improve first-run proof with `crmy quickstart`;
-- add live-provider certification docs and transcript-drop fixtures for repeatable production verification;
-- harden setup output, admin pagination, Settings bundle performance, and background-worker recovery guidance.
+- require same-origin browser cookie mutations, stronger connector/admin scopes, safer file-ingest defaults, and production-safe MCP Knowledge connector endpoint policies;
+- include Trusted Facts in AI briefing summaries when configured;
+- keep model auto-promotion blocked unless certification evidence satisfies the release gate;
+- add Memory freshness indexes for dated and undated review sweeps;
+- mark Automations and Sequences as experimental admin surfaces, not the default CRMy path;
+- improve contact detail clarity by labeling the contact score as Lead score;
+- refresh package versions, OpenAPI, README, guide, release notes, packaged web assets, and release tests for 0.9.4.
 
 ## Highlights
 
-### Eval Harness And Agent Quality Gates
+### Trust Boundary Hardening
 
-- Added a local eval harness for deterministic customer-context corpora and production-path extraction quality.
-- Added seeded retrieval, Action Context, source attribution, tool-choice, and agent trajectory smoke coverage.
-- Added `crmy eval` support so contributors and customers can run quality gates locally without a hosted eval service.
-- Added release-gate coverage so eval docs, fixtures, and production-path behaviors stay aligned.
+- Cookie-authenticated browser requests that change data must now come from the CRMy origin. `CRMY_PUBLIC_URL` is honored for proxied deployments.
+- Agent settings now require the dedicated `agent:admin` scope in addition to admin or owner role.
+- Knowledge Source and Context Connector settings now require explicit systems scopes, and Knowledge sync also requires `knowledge:write`.
+- File extraction preview now requires `context:write`, and full extracted text is returned only when callers explicitly request `include_text`.
+- MCP Knowledge connector endpoints block localhost, link-local, and private-network targets by default. Self-hosted deployments can opt in with `CRMY_ALLOW_PRIVATE_MCP_CONNECTORS=true`.
 
-### Governed Product Knowledge
+### Trusted Facts And Briefings
 
-- Added `knowledge_retrieve` and the `product_knowledge` toolset for optional governed product context.
-- Added product knowledge claim storage and retrieval receipts with approval, grounding, freshness, source visibility, and customer-safety policy.
-- Briefings and Action Context can now include a `product_context` section when configured.
-- Customer-facing email draft previews can cite approved product claims, warn when claims are excluded, and persist knowledge receipt metadata.
-- Added `crmy knowledge retrieve` plus UI display for approved claims, sources, exclusions, and product-claim usage in drafts.
-- Added admin governance for product claims: review queue, approval/rejection/deprecation/staleness/reactivation, freshness review, conflict detection, source-priority resolution, review assignments, and Product Knowledge settings.
+- AI briefing summaries now include approved Trusted Facts when configured, instead of quietly omitting the governed knowledge layer.
+- Knowledge Sources remains MCP-only for this release. Unsupported web, drive, and generic source placeholders are intentionally absent.
+- Trusted Facts remain separate from customer Memory and are included only when approval, grounding, freshness, visibility, and customer-safety policy allow it.
 
-### Grounding And Trust
+### Memory And Model Trust
 
-- Added a source-grounding gate for Memory auto-promotion. Signals only auto-promote when evidence is present in the source, reducing the risk of model-created Memory from ungrounded claims.
-- Freshness windows mark expired or aging product claims stale without blocking core customer-context flows.
-- Added provider certification guidance for Gmail, Outlook, Google Calendar, and Microsoft 365 Calendar across CRMy-managed, tenant-owned, and self-hosted OAuth app sources.
-- Added a synthetic transcript-drop fixture for local-folder and S3-compatible source-drop smoke testing without real customer content.
-- Confirmed sent/seller-authored and mixed-authorship context remains distinguishable from customer-authored evidence in the documented workflows.
+- Production settings no longer allow operators to manually mark a model as certified. Certification must come from the eval certification path before auto-promotion can rely on it.
+- New Memory freshness indexes support active Memory review sweeps without forcing table scans as tenants grow.
+- The trust integrity migrations for Memory claim tiers, grounding method, model certification fields, and freshness indexes are included in the 0.9.4 path.
 
-### MCP, CLI, And Setup
+### Product Surface Cleanup
 
-- Added per-session MCP toolsets via CLI flags, query params, and headers. Selection narrows the visible catalog but never widens actor scope.
-- Autonomous agents default to a leaner `standard` toolset; human/admin sessions default to `full`.
-- Added `crmy quickstart` for the connector-free proof path: resolve customer, get briefing, get Action Context, and inspect lineage.
-- `crmy init` now masks database credentials in setup output.
+- Automations and Sequences are now labeled as experimental admin surfaces in UI and documentation. They are not part of the default Core Profile or first-run path.
+- Settings now uses the clearer Automation Experiments label.
+- Contact detail views now label contact scoring as Lead score with an icon, reducing confusion with account or deal health.
 
-### Production Hardening And Performance
+### Release Metadata And Packaging
 
-- Admin actor and user lists now use stable timestamp-plus-id cursors, including pending-review rank for actor pagination.
-- Heavy Settings subsections are lazy-loaded, reducing the Settings route chunk from roughly 503 kB to roughly 222 kB in the production web build.
-- Background worker advisory-lock release now binds its lock key correctly, and missing-schema worker failures now point operators to `crmy migrate run`.
-- OpenAPI, README, guide, release notes, packaged web assets, and durability gates were refreshed for the 0.9.3 surface.
+- All workspace packages, package lock metadata, OpenAPI, README, release notes, and changelog now identify `0.9.4`.
+- The packaged server web assets were rebuilt after the UI polish.
+- The OpenAPI artifact was regenerated from source.
 
 ## Published Packages
 
 Publish candidates:
 
-- `@crmy/core@0.9.3`
-- `@crmy/shared@0.9.3`
-- `@crmy/server@0.9.3`
-- `@crmy/web@0.9.3`
-- `@crmy/cli@0.9.3`
-- `@crmy/openclaw-plugin@0.9.3`
+- `@crmy/core@0.9.4`
+- `@crmy/shared@0.9.4`
+- `@crmy/server@0.9.4`
+- `@crmy/web@0.9.4`
+- `@crmy/cli@0.9.4`
+- `@crmy/openclaw-plugin@0.9.4`
 
 ## Quick Validation
 
@@ -85,28 +79,28 @@ npx -y @crmy/cli action-context "account:Northstar Labs" --action customer_outre
 
 Before release:
 
-- `npm run lint`
-- `npm test` — 163/163 passing
-- `npm run test:cli-coverage` — 23/23 passing
-- `npm run build --workspace=packages/web`
-- `npm run build --workspace=packages/server`
-- `npm run build --workspace=packages/cli`
-- `npm run generate:openapi --workspace=packages/server`
-- `npm audit --audit-level=moderate --omit=dev`
-- `npm publish --workspaces --include-workspace-root --dry-run`
+- `npm audit --audit-level=moderate --omit=dev` found 0 vulnerabilities.
+- `npm run lint` passed.
+- `npm test` passed, 163/163.
+- `npm run test:cli-coverage` passed, 23/23.
+- `node --test packages/server/test/*.test.mjs` passed, 231/231 with 1 expected integration skip when no DB env is set.
+- `npm run test:integration:local --workspace=packages/server` passed, 6/6 against the migrated local app database. `022_pgvector.sql` was skipped because `ENABLE_PGVECTOR=true` was not set.
+- `npm run test:ui-smoke` passed against `http://localhost:3000/app/`.
+- `npm run build` passed.
+- `npm run generate:openapi --workspace=packages/server` passed.
 
 ## Notes And Caveats
 
 - Live Gmail, Outlook, Google Calendar, Microsoft Calendar, HubSpot, Salesforce, and warehouse connector certification remains environment-dependent and should be run before production provider claims.
 - The provider certification checklist is now explicit for Google/Microsoft OAuth app sources, but those live-provider tests cannot be completed without sandbox or production provider accounts.
-- Governed product knowledge is optional. It does not create customer Memory and should remain customer-facing only when claims are approved, grounded, fresh, and externally safe.
+- Trusted Facts are optional. They do not create customer Memory and should remain customer-facing only when approved, grounded, fresh, and externally safe.
 - Global REST/MCP/agent quotas and SaaS-scale rate limiting remain post-0.9 work.
 
 # CRMy v0.9.2
 
 CRMy v0.9.2 is the transcript ingestion, scale, and production hardening release. It expands CRMy beyond mailbox/calendar context by adding admin-managed transcript and raw-note drops, then tightens the runtime path for higher-volume, hosted, and agent-first deployments.
 
-This release keeps the core promise intact: messy customer context enters once, becomes traceable Raw Context, resolves into reviewable Signals, promotes into durable Memory only when ready, and returns compact Action Context before agents act.
+This release keeps the core promise intact: messy customer context enters once as traceable Sources, resolves into reviewable Signals, promotes into durable Memory only when ready, and returns compact Action Context before agents act.
 
 ## Release Focus
 
@@ -133,7 +127,7 @@ v0.9.2 focuses on source breadth, durability, and release readiness:
 
 - Transcript drops feed the same path as customer activity notes:
 
-  `Source Object -> Meeting Artifact / Customer Activity -> Raw Context -> Signals -> Memory -> Lineage / Handoff`
+  `Source Object -> Meeting Artifact / Customer Activity -> Sources -> Signals -> Memory -> Lineage / Handoff`
 
 - Matching now supports sidecar metadata, provider calendar identifiers, meeting time plus attendee overlap, contact/account domain matching, and Subject Graph resolution.
 - Transcript and meeting context preserve authorship metadata so customer-authored, CRMy-authored, mixed, and unknown sources can be treated differently.
@@ -211,7 +205,7 @@ Before publish:
 
 # CRMy v0.9.1
 
-CRMy v0.9.1 is the email context workflow release — the hardening line that makes customer email easier to connect, easier to trust, easier to send from the right identity, and easier for agents to follow from source message to Raw Context, Signals, Memory, activity, approval, and reply.
+CRMy v0.9.1 is the email context workflow release — the hardening line that makes customer email easier to connect, easier to trust, easier to send from the right identity, and easier for agents to follow from source message to Sources, Signals, Memory, activity, approval, and reply.
 
 Before an agent drafts or sends customer email, CRMy now does more than generate copy. It resolves who is sending, what mailbox is used for context, whether replies can flow back into Memory, what evidence is safe to cite, and whether the action needs human approval. v0.9.1 turns email from a disconnected side surface into a first-class customer context source and governed action path.
 
@@ -241,7 +235,7 @@ v0.9.1 focuses on email context, sender identity, and setup clarity:
 
 - Sent email is recorded as account activity and becomes context for future agents.
 - CRMy distinguishes seller/CRMy-authored outbound email from customer-authored evidence, so agents can see what your team said without treating it as what the customer claimed.
-- Email and calendar sources are traceable through Raw Context, Signal, Memory, Lineage, and account activity views.
+- Email and calendar sources are traceable through Sources, Signals, Memory, Lineage, and account activity views.
 - Reply-chain metadata, sender identity, linked records, and provider thread/conversation context are preserved so follow-up replies can be matched back to the original workflow.
 
 ### Mailbox, Calendar, and OAuth Setup
@@ -268,11 +262,11 @@ v0.9.1 focuses on email context, sender identity, and setup clarity:
 
 ### Retrieval, Scale, and Token Control
 
-- Context, Raw Context, Signal Group, and Activity list pagination now use stable timestamp-plus-id cursors so high-volume timestamp ties do not skip or duplicate rows.
+- Context, Sources, Signal Group, and Activity list pagination now use stable timestamp-plus-id cursors so high-volume timestamp ties do not skip or duplicate rows.
 - Briefings and Action Context now support token budget profiles: `tiny`, `standard`, `deep`, and `evidence_heavy`.
 - `evidence_mode` lets agents choose compact evidence summaries, full proof inline, or no evidence arrays for cheap scanning.
 - Ranking now accounts for confidence, freshness decay, context type priority, evidence support, and proposed action relevance.
-- README now includes a dedicated section explaining how CRMy reduces token usage by compressing Raw Context into Signals/Memory, using action-sized retrieval, and keeping proof available on demand.
+- README now includes a dedicated section explaining how CRMy reduces token usage by compressing Sources into Signals/Memory, using action-sized retrieval, and keeping proof available on demand.
 
 ### Release and Operations Polish
 

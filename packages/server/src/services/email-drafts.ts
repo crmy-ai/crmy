@@ -6,7 +6,7 @@ import {
   type ActionContext,
   type ActionContextProposedAction,
   type ActorContext,
-  type ProductContext,
+  type KnowledgeContext,
   type SubjectType,
   type UUID,
   notFound,
@@ -228,12 +228,12 @@ async function resolveDraftContext(
  * briefing truncation) and compact proof metadata for the response. Returns
  * undefined when there is nothing actionable to surface.
  */
-export function buildProductDraftPieces(pc: ProductContext | undefined) {
+export function buildKnowledgeDraftPieces(pc: KnowledgeContext | undefined) {
   if (!pc || (pc.relevant_claims.length === 0 && pc.avoid_claims.length === 0)) return undefined;
   return {
     packet: {
       status: pc.status,
-      note: 'Use ONLY these approved, cited claims for company, product, pricing, capability, security, and competitive statements. Cite the source. Never assert knowledge claims not listed here.',
+      note: 'Use ONLY these approved, cited Trusted Facts for company, product, pricing, capability, security, and competitive statements. Cite the source. Never assert knowledge not listed here.',
       claims: pc.relevant_claims.map(claim => ({
         id: claim.id,
         knowledge_type: claim.knowledge_type,
@@ -246,7 +246,7 @@ export function buildProductDraftPieces(pc: ProductContext | undefined) {
     },
     used: {
       status: pc.status,
-      used_claim_ids: pc.relevant_claims.map(claim => claim.id),
+      used_snippet_ids: pc.relevant_claims.map(claim => claim.id),
       excluded_count: pc.avoid_claims.length,
       citations: pc.citations,
       warnings: pc.warnings,
@@ -272,7 +272,7 @@ async function buildResponsePacket(
     memoryCount = Object.values(actionContext.briefing.context_entries ?? {}).reduce((sum, entries) => sum + entries.length, 0);
     signalCount = actionContext.briefing.signal_groups?.length ?? 0;
   }
-  const productPieces = buildProductDraftPieces(actionContext?.briefing.product_context);
+  const knowledgePieces = buildKnowledgeDraftPieces(actionContext?.briefing.knowledge);
 
   return {
     ctx,
@@ -299,16 +299,16 @@ async function buildResponsePacket(
       } : null,
       briefing: briefingText,
       action_context: actionContextSummary ?? null,
-      product_knowledge: productPieces?.packet ?? null,
+      knowledge: knowledgePieces?.packet ?? null,
       guardrails: [
         'Use confirmed Memory as facts.',
         'Treat Signals as unconfirmed and do not overstate them.',
         'Follow the Action Context guidance. If review is required, draft the message but do not imply it can be sent without approval.',
         'Be concise, specific, and useful.',
         'Do not invent customer commitments, dates, pricing, or approvals.',
-        ...(productPieces
-          ? ['For any product, pricing, capability, security, or competitive claim, use ONLY the approved claims in product_knowledge and cite them. Do not state product facts that are not listed, and never use anything in product_knowledge.avoid.']
-          : ['Do not state specific product capabilities, pricing, security posture, or competitive claims unless they are in the briefing; when unsure, stay general.']),
+        ...(knowledgePieces
+          ? ['For any product, pricing, capability, security, or competitive statement, use ONLY the approved Trusted Facts in knowledge and cite them. Do not state product facts that are not listed, and never use anything in knowledge.avoid.']
+          : ['Do not state specific product capabilities, pricing, security posture, or competitive statements unless they are in the briefing; when unsure, stay general.']),
       ],
     },
 	    context_used: {
@@ -319,7 +319,7 @@ async function buildResponsePacket(
       signal_count: signalCount,
       used_unconfirmed_signals: signalCount > 0,
 	      action_context: actionContextSummary,
-	      product_knowledge: productPieces?.used,
+	      knowledge: knowledgePieces?.used,
 	      sender: publicSender(sender),
 	    },
 	  };
@@ -392,22 +392,22 @@ export async function previewEmailDraft(db: DbPool, actor: ActorContext, input: 
       ...(context_used.action_context?.review_required
         ? ['Action Context says this email should go through review before sending.']
         : []),
-      ...(context_used.product_knowledge?.warnings ?? []),
-      ...((context_used.product_knowledge?.excluded_count ?? 0) > 0
-        ? [`${context_used.product_knowledge?.excluded_count} knowledge claim(s) were excluded as not customer-safe and were not used.`]
+      ...(context_used.knowledge?.warnings ?? []),
+      ...((context_used.knowledge?.excluded_count ?? 0) > 0
+        ? [`${context_used.knowledge?.excluded_count} Trusted Fact(s) were excluded as not customer-safe and were not used.`]
         : []),
     ],
     model_metadata: {
       draft_origin: 'agent_generated',
       generated_at: new Date().toISOString(),
       action_context: context_used.action_context,
-      ...(context_used.product_knowledge
+      ...(context_used.knowledge
         ? {
-            used_knowledge_claim_ids: context_used.product_knowledge.used_claim_ids,
-            knowledge_retrieval_receipt_ids: context_used.product_knowledge.retrieval_receipt_id
-              ? [context_used.product_knowledge.retrieval_receipt_id]
+            used_knowledge_snippet_ids: context_used.knowledge.used_snippet_ids,
+            knowledge_retrieval_receipt_ids: context_used.knowledge.retrieval_receipt_id
+              ? [context_used.knowledge.retrieval_receipt_id]
               : [],
-            knowledge_citations: context_used.product_knowledge.citations,
+            knowledge_citations: context_used.knowledge.citations,
           }
         : {}),
     },

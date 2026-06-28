@@ -10,6 +10,19 @@ No unreleased changes yet.
 
 ---
 
+## [0.9.4] - 2026-06-28
+
+### Changed
+
+- Tightened production trust boundaries with same-origin browser cookie mutation checks, scoped admin connector/model settings, safer file-ingest defaults, and private-network protection for MCP Knowledge connectors.
+- Included Trusted Facts in AI briefing summaries when configured, so compact agent-facing summaries stay aligned with governed briefings.
+- Added Memory freshness indexes and blocked production manual model certification from Settings.
+- Marked Automations and Sequences as experimental admin surfaces instead of default product paths.
+- Labeled contact detail scoring as Lead score to avoid confusion with account or deal health.
+- Updated package, OpenAPI, README, guide, and release-note metadata for 0.9.4.
+
+---
+
 ## [0.9.3] — 2026-06-26
 
 ### Added
@@ -17,13 +30,13 @@ No unreleased changes yet.
 - **Local eval harness + production-path extraction quality eval** ([#29](https://github.com/crmy-ai/crmy/pull/29)) — makes extraction quality measurable across datasets and models, the foundation for capability-gated promotion.
 - **Per-session MCP toolsets** ([#30](https://github.com/crmy-ai/crmy/pull/30)) — narrow the registered tool catalog per session/job via `--toolset`, `?toolset=`, or the `X-CRMy-Toolset` header. Selection never widens scope; autonomous agents default to a lean `standard` set, humans/admins to `full`. Override with `CRMY_MCP_DEFAULT_TOOLSET`.
 - **Connector-free `crmy quickstart`** ([#32](https://github.com/crmy-ai/crmy/pull/32)) — one command seeds demo context and runs the connector-free golden path (resolve -> briefing -> Action Context -> lineage) with onboarding next steps.
-- **Governed Product Knowledge Retrieval — Phase 1** — `knowledge_retrieve` MCP tool + `KnowledgeRetrievalService` contract and `product_knowledge` toolset. Optional and non-blocking: returns a clear `not_configured` until governed product claims exist; never creates Memory or writes to systems of record.
-- **Governed Product Knowledge Retrieval — Phase 2** — claim store + governed retrieval: `knowledge_claims` / `knowledge_retrieval_receipts` (migration 086), policy filtering (customer-facing requires approved + source-grounded + external + fresh; internal labels risk in warnings), lexical search, ranking, and durable retrieval receipts. Adds the admin `knowledge_claim_upsert` tool (grounding verified against `source_text`) and the `POST /api/v1/knowledge/retrieve` REST endpoint.
-- **Governed Product Knowledge Retrieval — Phase 3** — briefings and Action Context now surface relevant product knowledge as a `product_context` sibling to customer Memory. `include_product_context` **defaults to true when product knowledge is configured** (override per call); it is strictly additive and never fails the core response. Action Context adds an informational `product_knowledge` check plus `used_knowledge_claim_ids` / `knowledge_retrieval_receipt_ids` proof, reusing the existing `checks`/`proof` slots.
-- **Governed Product Knowledge Retrieval — Phase 4** — `email_draft_preview` grounds customer-facing drafts in approved, cited product claims (and is instructed to avoid excluded ones). The draft records `used_knowledge_claim_ids`, `knowledge_retrieval_receipt_ids`, and `knowledge_citations` in `model_metadata`, surfaces a `context_used.product_knowledge` summary, and warns when claims were excluded as not customer-safe.
-- **Governed Product Knowledge Retrieval — Phase 5** — `crmy knowledge retrieve` CLI command, plus web display: a **Product Knowledge** section in the briefing panel (approved claims, sources, exclusions, warnings) and a "product claim(s) used" indicator on generated email drafts.
-- **Governed Product Knowledge Retrieval — Phase 6** — freshness windows mark expired or aging product claims stale without blocking core customer-context flows.
-- **Governed Product Knowledge Retrieval — Phase 7** — admin governance for claim review, approval/rejection/deprecation/staleness/reactivation, conflict detection, source-priority resolution, review assignments, and the Product Knowledge settings surface.
+- **Governed Knowledge Retrieval — Phase 1** — `knowledge_retrieve` MCP tool + `KnowledgeRetrievalService` contract and `knowledge` toolset. Optional and non-blocking: returns a clear `not_configured` until Trusted Facts exist; never creates Memory or writes to systems of record.
+- **Governed Knowledge Retrieval — Phase 2** — Trusted Fact store + governed retrieval: `knowledge_claims` / `knowledge_retrieval_receipts` (migration 086), policy filtering (customer-facing requires approved + source-grounded + external + fresh; internal labels risk in warnings), lexical search, ranking, and durable retrieval receipts. Adds the admin `knowledge_claim_upsert` tool (grounding verified against `source_text`) and the `POST /api/v1/knowledge/retrieve` REST endpoint.
+- **Governed Knowledge Retrieval — Phase 3** — briefings and Action Context now surface relevant Trusted Facts as a `knowledge` sibling to customer Memory. `include_knowledge` defaults to true when Trusted Facts are configured (override per call); it is strictly additive and never fails the core response. Action Context adds an informational `knowledge` check plus `used_knowledge_snippet_ids` / `knowledge_retrieval_receipt_ids` proof, reusing the existing `checks`/`proof` slots.
+- **Governed Knowledge Retrieval — Phase 4** — `email_draft_preview` grounds customer-facing drafts in approved, cited Trusted Facts (and is instructed to avoid excluded ones). The draft records `used_knowledge_snippet_ids`, `knowledge_retrieval_receipt_ids`, and `knowledge_citations` in `model_metadata`, surfaces a `context_used.knowledge` summary, and warns when facts were excluded as not customer-safe.
+- **Governed Knowledge Retrieval — Phase 5** — `crmy knowledge retrieve` CLI command, plus web display: a **Trusted Facts** section in the briefing panel (approved facts, sources, exclusions, warnings) and a Trusted Fact indicator on generated email drafts.
+- **Governed Knowledge Retrieval — Phase 6** — freshness windows mark expired or aging Trusted Facts stale without blocking core customer-context flows.
+- **Governed Knowledge Retrieval — Phase 7** — admin governance for Trusted Fact review, approval/rejection/deprecation/staleness/reactivation, conflict detection, source-priority resolution, review assignments, and the Knowledge workspace/settings surface.
 - **Provider certification checklist** — added a repeatable Google/Microsoft live-provider checklist for mailbox context, sender/drafts, calendar sync, free/busy, reply matching, failure handling, and app-source coverage before production claims.
 - **Transcript drop fixture** — added a synthetic Northstar transcript + sidecar fixture for local-folder and S3-compatible transcript source smoke testing.
 
@@ -47,7 +60,7 @@ No unreleased changes yet.
 
 - **Transcript and note drops**: added admin-managed Context Source Drops for S3-compatible buckets and local self-hosted folders, with source-object tracking, content hashes, size limits, match state, processing state, review status, and linked records.
 - **Transcript parsing and matching**: added ingestion support for `.txt`, `.md`, `.vtt`, `.srt`, `.json`, `.docx`, and `.pdf`, with matching through sidecar metadata, provider calendar identifiers, meeting time plus attendee overlap, contact/account domains, and Subject Graph resolution.
-- **Raw Context pipeline integration**: transcript drops feed the same Source Object -> Meeting Artifact / Customer Activity -> Raw Context -> Signals -> Memory -> Lineage / Handoff path as other customer context sources.
+- **Source pipeline integration**: transcript drops feed the same Source Object -> Meeting Artifact / Customer Activity -> Sources -> Signals -> Memory -> Lineage / Handoff path as other customer context sources.
 - **Reviewable failure modes**: oversized, unmatched, ambiguous, and failed transcript files remain visible in review/Handoff flows instead of being silently skipped.
 - **Production runtime hardening**: added PostgreSQL-backed unauthenticated auth throttling, production database TLS guardrails, migration startup modes, process roles, worker advisory-lock fixes, and durable outbound webhook backlog processing.
 - **Scale and retrieval**: added stable timestamp-plus-id cursor pagination and estimated totals across high-volume list surfaces, plus token budget profiles, ranked retrieval, and evidence-on-demand behavior.
@@ -64,7 +77,7 @@ Live external-provider certification remains environment-dependent. Local folder
 
 ### Release Focus
 
-0.9.1 is the email context workflow release. It makes customer email easier to connect, easier to trust, easier to send from the right identity, and easier for agents to follow from source message to Raw Context, Signals, Memory, activity, approval, and reply.
+0.9.1 is the email context workflow release. It makes customer email easier to connect, easier to trust, easier to send from the right identity, and easier for agents to follow from source message to Sources, Signals, Memory, activity, approval, and reply.
 
 ### Highlights
 
@@ -121,7 +134,7 @@ pgvector remains optional. Semantic search improves retrieval when configured, b
 - **Writeback safety**: pending writebacks can no longer execute before approval, and HITL/writeback review state updates are transactional.
 - **Migration reliability**: migrations now use a connection-scoped PostgreSQL advisory lock.
 - **MCP/API/CLI parity**: actor-scoped REST and CLI tool listing, description, and invocation remain part of this package line.
-- **Recipes and harnesses**: recipes/examples continue to use friendly record references, `agent-smoke`, `tools describe`, and Raw Context ingestion guidance.
+- **Recipes and harnesses**: recipes/examples continue to use friendly record references, `agent-smoke`, `tools describe`, and Source ingestion guidance.
 
 ### Notes
 
@@ -133,14 +146,14 @@ This is not the 0.9 release. It is a launch-hardening patch on the 0.8.x line.
 
 ### Release Focus
 
-0.8.6 is a follow-up 0.8.x hardening release focused on proving CRMy from external agent harnesses. It improves MCP/API/CLI parity, refreshes recipes and examples, and aligns OpenClaw support with the current Raw Context -> Signals -> Memory model.
+0.8.6 is a follow-up 0.8.x hardening release focused on proving CRMy from external agent harnesses. It improves MCP/API/CLI parity, refreshes recipes and examples, and aligns OpenClaw support with the current Sources -> Signals -> Memory model.
 
 ### Highlights
 
 - **MCP/API/CLI parity**: added actor-scoped REST endpoints for listing, describing, and calling MCP tools, plus `crmy tools list`, `crmy tools describe`, and `crmy tools call`.
 - **Tool-surface coverage**: CLI coverage now verifies direct HTTP mappings, generic actor-scoped tool fallback, and the one-minute `agent-smoke` path.
 - **Recipe cleanup**: added a recipes index, clarified seeded Northstar demo data, and updated runnable CLI examples to prefer friendly record references over UUIDs.
-- **Raw Context guidance**: recipes now steer messy transcripts, emails, notes, research, and debriefs through `context_ingest_auto`, keeping direct `context_add` for advanced reviewed writes.
+- **Source guidance**: recipes now steer messy transcripts, emails, notes, research, and debriefs through `context_ingest_auto`, keeping direct `context_add` for advanced reviewed writes.
 - **OpenClaw support**: the OpenClaw plugin now exposes `context.ingest_auto`, and its skill guidance uses accounts terminology plus the current Signal/Memory/Handoff model.
 - **Docs alignment**: README, guide, MCP docs, OpenAPI, roadmap, examples, and release notes now describe the same MCP/API/CLI and Action Context behavior.
 
@@ -154,15 +167,15 @@ This is not the 0.9 release. It is the next 0.8.x package release on the path to
 
 ### Release Focus
 
-0.8.5 is the first major hardening checkpoint on the way to 0.9. It tightens CRMy’s core loop without broadening the product surface: Raw Context reliability, account-scoped record resolution, scoped agent/MCP setup, surface cleanup, web performance, and release readiness.
+0.8.5 is the first major hardening checkpoint on the way to 0.9. It tightens CRMy’s core loop without broadening the product surface: Source reliability, account-scoped record resolution, scoped agent/MCP setup, surface cleanup, web performance, and release readiness.
 
 ### Highlights
 
-- **Raw Context reliability**: durable receipts, retry metadata, replayable payloads, stale-processing recovery, and consistent app/REST/MCP/CLI ingestion semantics are now documented and covered.
+- **Source reliability**: durable receipts, retry metadata, replayable payloads, stale-processing recovery, and consistent app/REST/MCP/CLI ingestion semantics are now documented and covered.
 - **Golden corpus coverage**: extraction and record-resolution tests now cover account-scoped child records, duplicate names, malformed JSON, no-context inputs, proposed records, custom registries, and conservative auto-promotion.
 - **Duplicate corroboration safety**: repeated ingestion of the same source no longer creates extra independent evidence or artificially validates Signals.
-- **Subject Graph alignment**: Raw Context, reprocess, file ingestion, Customer Email, Customer Activity, CLI, MCP, and agent guidance now share one primary customer-record resolver model.
-- **Surface cleanup**: Context focuses on Raw Context, Signals, Memory, Lineage, and Context Sources; Email and Activity are supporting sources; Automations/Sequences are moved into admin settings while compatible routes remain.
+- **Subject Graph alignment**: Source ingestion, reprocess, file ingestion, Customer Email, Customer Activity, CLI, MCP, and agent guidance now share one primary customer-record resolver model.
+- **Surface cleanup**: Context focuses on Sources, Signals, Memory, Lineage, and Context Sources; Email and Activity are supporting sources; Automations/Sequences are moved into admin settings while compatible routes remain.
 - **MCP/CLI setup confidence**: `agent-smoke` verifies `customer_record_resolve -> briefing_get -> context_signal_group_list`, and `doctor` now catches stale or mismatched `CRMY_API_KEY` values before agent harness setup fails.
 - **Web performance**: major routes, drawers, and editors are lazy-loaded, dropping the initial web bundle below Vite’s warning threshold.
 - **UX consistency**: lingering Signal action labels now use the user-facing `Confirm Signal` / `Dismiss Signal` language.
@@ -182,12 +195,12 @@ The 0.8.5 gate verifies correctness, drift, packaging, and local install-to-valu
 
 ### Highlights
 
-- **Clearer product promise**: README and guide language now explain CRMy around typed operational Memory, Active Context, Raw Context, Signals, Handoffs, and governed writeback.
+- **Clearer product promise**: README and guide language now explain CRMy around typed operational Memory, Active Context, Sources, Signals, Handoffs, and governed writeback.
 - **Agent harness examples**: added or refreshed examples for Claude Code, Claude Desktop, Codex, ChatGPT Developer Mode, Hermes Agent, and OpenClaw so install-to-value can be proven through MCP quickly.
 - **Scoped GTM workspace polish**: member/manager/admin experiences are clearer, with safer scoped access expectations and user-facing Overview patterns.
-- **Raw Context and Signal reliability**: improved subject association, account-scoped extraction guidance, Signal readiness, and Lineage/Context Graph clarity.
+- **Source and Signal reliability**: improved subject association, account-scoped extraction guidance, Signal readiness, and Lineage/Context Graph clarity.
 - **Workspace Agent improvements**: tightened readiness messaging, scoped tool expectations, durable/background task behavior, attachments, record draft preview, and email drafting paths.
-- **Customer Email and Customer Activity**: reframed mailbox/calendar data as optional context feeds, with stronger filtering, record matching, and Raw Context processing language.
+- **Customer Email and Customer Activity**: reframed mailbox/calendar data as optional context feeds, with stronger filtering, record matching, and Source processing language.
 - **Systems of Record clarity**: setup now better communicates what CRMy reads, what it may write, when writeback occurs, and how approvals/audit fit.
 - **UI consistency**: login, Command Center, Handoffs, Context tabs, record drawers, Signals, Memory, search, empty states, and object actions received consistency and usability polish.
 - **MCP/CLI drift repair**: expanded coverage and documentation around agent-facing tools, record draft preview, email drafting, activity/email context, and the `agent-smoke` validation path.
@@ -202,15 +215,15 @@ Live connector certification remains environment-dependent. HubSpot is the prima
 
 ### Release Focus
 
-0.8.2 is the release-candidate polish pass for CRMy as an agent-native GTM context and execution layer. It tightens the Raw Context → Signals → Memory → Handoffs flow, improves scoped user workspaces, hardens handoff-backed record creation, and updates package/OpenAPI metadata for the 0.8.2 push.
+0.8.2 is the release-candidate polish pass for CRMy as an agent-native GTM context and execution layer. It tightens the Sources → Signals → Memory → Handoffs flow, improves scoped user workspaces, hardens handoff-backed record creation, and updates package/OpenAPI metadata for the 0.8.2 push.
 
 ### Highlights
 
-- **Clearer context lifecycle**: Raw Context ingestion, grouped Signals, trusted Memory, Context Graph, and Memory Lineage now use simpler product language and route users to the right review/action surface.
+- **Clearer context lifecycle**: Source ingestion, grouped Signals, trusted Memory, Context Graph, and Memory Lineage now use simpler product language and route users to the right review/action surface.
 - **Scoped human workspaces**: members land on a daily Overview for their book of business, managers see team work, and admins keep the Command Center, Memory Health, Operations, Audit Log, and full Settings.
 - **Action-oriented Handoffs**: decision packets, reassignment, friendlier SLA presets, card/table consistency, and clearer approve/reject behavior make policy-gated work easier to complete.
 - **Workspace Agent safety**: non-admin users can use the admin-configured model without seeing secrets, while sessions and tools stay bounded to the current user’s visible records.
-- **Raw Context extraction resilience**: extraction uses richer context packets, JSON-mode model calls where available, longer bounded timeouts, repair parsing, single-pass multi-subject extraction, and record-proposal handoffs for likely new accounts, contacts, opportunities, or use cases.
+- **Source extraction resilience**: extraction uses richer context packets, JSON-mode model calls where available, longer bounded timeouts, repair parsing, single-pass multi-subject extraction, and record-proposal handoffs for likely new accounts, contacts, opportunities, or use cases.
 - **Release hardening**: approved record-proposal handoffs now create records with the linked human owner and resolve atomically so failed record creation cannot leave an approval half-applied.
 
 ### Notes

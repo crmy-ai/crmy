@@ -178,7 +178,7 @@ function ConnectorsTab() {
       <div className="mb-5 max-w-3xl">
         <h2 className="text-lg font-display font-semibold text-foreground">Context Connectors</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Choose how customer material enters CRMy. Add Context handles pasted or uploaded notes, emails, transcripts, and call summaries. MCP/API lets agents and scripts send source material programmatically. CRMy turns each input into Sources, then Signals, Memory, and Action Context for agents.
+          Choose how customer material enters CRMy. Add Context handles pasted or uploaded notes, emails, transcripts, and call summaries. MCP/API lets agents and scripts send source material programmatically. CRMy saves each input as a Source, extracts Signals and Memory, then assembles Action Context for agents.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">

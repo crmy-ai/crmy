@@ -19,7 +19,7 @@ Applies to:
 - Enterprise self-hosted deployments with more than one app instance.
 - Worker deployments with more than one worker replica.
 - External MCP clients using Streamable HTTP sessions.
-- Workspace Agent turns, Raw Context processing, embeddings, sync, outbox,
+- Workspace Agent turns, Source processing, embeddings, sync, outbox,
   workflows, sequences, HITL, and writeback work.
 
 Does not block:
@@ -238,7 +238,7 @@ Required processors:
 | Processor | Work owned |
 | --- | --- |
 | `agent_turns` | Workspace Agent turn execution and recovery |
-| `raw_context` | Raw Context extraction, repair, and reprocess jobs |
+| `raw_context` | Source extraction, repair, and reprocess jobs |
 | `context_outbox` | Search indexing / context propagation outbox |
 | `embeddings` | Embedding backfill, repair, stale embedding refresh |
 | `mailbox_sync` | Email sync pages, provider retries, skipped-source stats |
@@ -436,7 +436,7 @@ CRMy is 1.0-ready for hosted multi-instance production when:
 - MCP session identity, ownership, actor/scope validation, and expiry are
   durable;
 - MCP live stream loss is recoverable without losing customer work;
-- Workspace Agent, Raw Context, embeddings, source sync, workflows, sequences,
+- Workspace Agent, Source, embeddings, source sync, workflows, sequences,
   HITL, and writebacks have explicit queue ownership, retries, and recovery;
 - production docs describe the required app, worker, migration, and session
   routing topology;

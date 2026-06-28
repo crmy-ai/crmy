@@ -466,7 +466,7 @@ export function useAddActivityContext() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['activity', variables.id] });
       qc.invalidateQueries({ queryKey: ['activities'] });
-      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['context-sources'] });
       qc.invalidateQueries({ queryKey: ['signal-groups'] });
       qc.invalidateQueries({ queryKey: ['context-entries'] });
     },
@@ -1152,7 +1152,7 @@ export function useUpdateEmailMessage() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['email-message', variables.id] });
       qc.invalidateQueries({ queryKey: ['email-messages'] });
-      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['context-sources'] });
       qc.invalidateQueries({ queryKey: ['signal-groups'] });
       qc.invalidateQueries({ queryKey: ['context-entries'] });
     },
@@ -1395,7 +1395,7 @@ export interface ActorConnectionSummary {
   connected_calendar_count: number;
   email_processed_count?: number;
   calendar_processed_count?: number;
-  raw_context_source_count?: number;
+  source_count?: number;
   signal_count?: number;
   memory_count?: number;
 }
@@ -1564,7 +1564,7 @@ export function useDbConfig() {
           context_entries: number;
           signals?: number;
           memory?: number;
-          raw_context_sources?: number;
+          sources?: number;
           handoffs?: number;
         };
       };
@@ -1598,7 +1598,7 @@ export function useSeedSampleData() {
       qc.invalidateQueries({ queryKey: ['activities'] });
       qc.invalidateQueries({ queryKey: ['context-entries'] });
       qc.invalidateQueries({ queryKey: ['signal-groups'] });
-      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['context-sources'] });
       qc.invalidateQueries({ queryKey: ['hitl'] });
       qc.invalidateQueries({ queryKey: ['hitl-requests'] });
       qc.invalidateQueries({ queryKey: ['assignments'] });
@@ -1911,7 +1911,7 @@ export function useContextLineage(params?: {
   subject_id?: string;
   context_entry_id?: string;
   signal_group_id?: string;
-  raw_context_source_id?: string;
+  source_id?: string;
 }) {
   const query = new URLSearchParams();
   Object.entries(params ?? {}).forEach(([key, value]) => {
@@ -1922,7 +1922,7 @@ export function useContextLineage(params?: {
     queryFn: () => api.get(`context/lineage?${query}`),
   });
 }
-export interface RawContextSource {
+export interface SourceProcessingRecord {
   id: string;
   source_type: string;
   source_ref: string;
@@ -1942,7 +1942,7 @@ export interface RawContextSource {
   created_at: string;
   updated_at: string;
 }
-export function useRawContextSources(params?: {
+export function useSourceProcessingRecords(params?: {
   source_type?: string;
   status?: string;
   subject_type?: string;
@@ -1950,14 +1950,14 @@ export function useRawContextSources(params?: {
   q?: string;
   limit?: number;
 }) {
-  return useList<RawContextSource>('raw-context-sources', 'context/raw-sources', params);
+  return useList<SourceProcessingRecord>('context-sources', 'context/sources', params);
 }
-export function useReprocessRawContextSource() {
+export function useReprocessSourceProcessingRecord() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.post(`context/raw-sources/${id}/reprocess`, {}),
+    mutationFn: (id: string) => api.post(`context/sources/${id}/reprocess`, {}),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['context-sources'] });
       qc.invalidateQueries({ queryKey: ['context-entries'] });
       qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
     },
@@ -2293,7 +2293,7 @@ export function useContextIngest() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['context-entries'] });
       qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
-      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['context-sources'] });
     },
   });
 }
@@ -2320,7 +2320,7 @@ export function useContextIngestAuto() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['context-entries'] });
       qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
-      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['context-sources'] });
     },
   });
 }
@@ -2336,12 +2336,12 @@ export function useDetectSubjects() {
 export function useIngestFile() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { filename: string; data: string; source_label?: string }) =>
+    mutationFn: (data: { filename: string; data: string; source_label?: string; include_text?: boolean }) =>
       api.post('context/ingest-file', data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['context-entries'] });
       qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
-      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['context-sources'] });
     },
   });
 }
@@ -2514,7 +2514,7 @@ export interface AgentSessionFull extends AgentSessionSummary {
     status: 'ready' | 'processing' | 'processed' | 'failed' | 'consumed';
     text_excerpt?: string | null;
     truncated?: boolean;
-    raw_context_source_id?: string | null;
+    source_id?: string | null;
     error_message?: string | null;
     created_at: string;
   }>;

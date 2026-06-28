@@ -1,4 +1,4 @@
-CRMy Raw Context Test Fixture
+CRMy Source Test Fixture
 Source type: call transcript
 Suggested source label: Northstar pilot planning call
 Suggested subject records: Northstar Labs, Maya Patel, Northstar Agent Context Rollout
@@ -84,7 +84,7 @@ the business impact section.
 
 [04:29] Cody:
 I will send a follow-up with the agenda today and include Sam, Elena, and David.
-We will prepare a Northstar-specific demo showing Raw Context to Signals,
+We will prepare a Northstar-specific demo showing Source to Signals,
 Signals to Memory, Handoff approval, and Salesforce writeback.
 
 [04:48] Maya:

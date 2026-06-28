@@ -23,6 +23,11 @@ export interface AgentConfig {
   auto_promote_signals: boolean;
   signal_auto_promote_threshold: number;
   signal_source_quality: Record<string, number>;
+  model_certification_status: 'uncertified' | 'certified' | 'failed';
+  model_certification_profile: string | null;
+  model_certification_run_id: string | null;
+  model_certification_score: number | null;
+  model_certified_at: string | null;
   backup_enabled: boolean;
   backup_provider: ProviderId | null;
   backup_base_url: string | null;

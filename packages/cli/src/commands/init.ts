@@ -683,6 +683,7 @@ export function initCommand(): Command {
           'systems:admin',
           'api_keys:admin',
           'email_provider:admin',
+          'agent:admin',
           'hitl:admin',
           'ops:read',
           'ops:write',
@@ -795,7 +796,7 @@ export function initCommand(): Command {
           const status = await seedSampleData(db, tenantId);
           const counts = status.counts;
           spinner.succeed(
-            `Demo data seeded  \x1b[2m(${counts.accounts} accounts, ${counts.contacts} contacts, ${counts.opportunities} opportunities, ${counts.raw_context_sources} Raw Context sources, ${counts.memory} Memory, ${counts.signals} Signals, ${counts.signal_groups} reviewable Signal sets)\x1b[0m`,
+            `Demo data seeded  \x1b[2m(${counts.accounts} accounts, ${counts.contacts} contacts, ${counts.opportunities} opportunities, ${counts.sources} Sources, ${counts.memory} Memory, ${counts.signals} Signals, ${counts.signal_groups} reviewable Signal sets)\x1b[0m`,
           );
         } catch {
           spinner.fail('Demo data seeding failed');

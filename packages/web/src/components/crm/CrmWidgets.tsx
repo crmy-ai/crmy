@@ -21,7 +21,17 @@ export function StageBadge({ stage }: { stage: string }) {
   );
 }
 
-export function LeadScoreBadge({ score, onRescore, rescoring }: { score: number; onRescore?: () => void; rescoring?: boolean }) {
+export function LeadScoreBadge({
+  score,
+  onRescore,
+  rescoring,
+  showLabel,
+}: {
+  score: number;
+  onRescore?: () => void;
+  rescoring?: boolean;
+  showLabel?: boolean;
+}) {
   const color = score >= 80 ? 'hsl(152, 55%, 42%)' : score >= 50 ? 'hsl(38, 92%, 50%)' : 'hsl(var(--muted-foreground))';
   const label = score >= 80 ? 'Hot lead' : score >= 50 ? 'Warm lead' : 'Cold lead';
   return (
@@ -30,7 +40,9 @@ export function LeadScoreBadge({ score, onRescore, rescoring }: { score: number;
       title={`Lead score: ${score}/100 — ${label}`}
       style={{ backgroundColor: color + '18', color }}
     >
-      <span className="px-2 py-0.5">{score}</span>
+      {showLabel && <Activity className="ml-1.5 h-3 w-3" />}
+      <span className={`${showLabel ? 'py-0.5' : 'px-2 py-0.5'}`}>{score}</span>
+      {showLabel && <span className="py-0.5 pr-1 font-sans text-xs font-medium opacity-80">Lead score</span>}
       {onRescore && (
         <button
           onClick={(e) => { e.stopPropagation(); onRescore(); }}

@@ -197,7 +197,7 @@ export function calendarTools(db: DbPool): ToolDef[] {
     {
       name: 'calendar_event_process',
       tier: 'extended',
-      description: 'Process a ready customer meeting artifact as Raw Context so CRMy can extract Signals and Memory.',
+      description: 'Process a ready customer meeting artifact as a Source so CRMy can extract Signals and Memory.',
       inputSchema: z.object({ id: z.string().uuid(), idempotency_key: z.string().max(128).optional() }),
       handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
         return runToolOperation(db, actor, 'calendar_event_process', input, async () => {
@@ -211,7 +211,7 @@ export function calendarTools(db: DbPool): ToolDef[] {
     {
       name: 'calendar_event_add_context',
       tier: 'extended',
-      description: 'Attach meeting notes, transcript, or recap text to a customer meeting and process it as Raw Context.',
+      description: 'Attach meeting notes, transcript, or recap text to a customer meeting and process it as a Source.',
       inputSchema: z.object({
         id: z.string().uuid(),
         artifact_type: z.enum(['transcript', 'notes', 'summary', 'recording', 'other']).default('notes'),

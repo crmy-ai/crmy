@@ -1,7 +1,7 @@
 -- Copyright 2026 CRMy Contributors
 -- SPDX-License-Identifier: Apache-2.0
 
--- Keep Context review/search surfaces responsive as Raw Context, Signals, and
+-- Keep Context review/search surfaces responsive as Sources, Signals, and
 -- Memory grow into large operational archives.
 
 CREATE INDEX IF NOT EXISTS context_entries_list_idx

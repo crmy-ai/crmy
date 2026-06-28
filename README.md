@@ -7,17 +7,17 @@
 <h2 align="center">Governed customer context and actions for AI agents</h2>
 
 <p align="center">
-  <strong>Messy Customer Data -> Trusted Facts -> Safe Agent Actions -> Proof at Every Step</strong>
+  <strong>Messy Customer Data -> Governed Context -> Safe Agent Actions -> Proof at Every Step</strong>
 </p>
 <p align="center">
-  Customer-facing AI agents can hallucinate facts, act on stale data, make unapproved claims, and typically leave no audit trail. That is why many never make it past the demo. CRMy gives them customer context they can trust. It turns transcripts, notes, emails, and CRM changes into source-checked facts, tells each agent what is safe to do now and what needs a human, and records a receipt for every action. Your agents act on what is real, not what a model guessed, and you can prove every move.
+  Customer-facing AI agents can hallucinate facts, act on stale data, make unapproved claims, and typically leave no audit trail. That is why many never make it past the demo. CRMy gives them customer context they can safely use. It turns transcripts, notes, emails, and CRM changes into source-grounded claims, tells each agent what is safe to do now and what needs a human, and records a receipt for every action. Your agents act on evidence-backed context, not unsupported model guesses, and you can prove every move.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@crmy/cli"><img alt="npm" src="https://img.shields.io/npm/v/@crmy/cli?label=npm&color=2563eb"></a>
   <a href="https://github.com/crmy-ai/crmy/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-0f172a"></a>
   <a href="https://discord.gg/2HvmudDwE"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white"></a>
-  <a href="https://github.com/crmy-ai/crmy/releases"><img alt="Release" src="https://img.shields.io/badge/release-v0.9.3-16a34a"></a>
+  <a href="https://github.com/crmy-ai/crmy/releases"><img alt="Release" src="https://img.shields.io/badge/release-v0.9.4-16a34a"></a>
   <a href="https://github.com/crmy-ai/crmy/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/crmy-ai/crmy?style=social"></a>
 </p>
 
@@ -70,7 +70,7 @@ Prefer the manual path, or want to see exactly what gets seeded? Use the <a href
 
 ## Why CRMy
 
-Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. They still hit walls when what's actually true about a customer is scattered across CRM fields, meeting transcripts, emails, notes, calendar events, and random documents.
+Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. They still hit walls when the context they need to rely on is scattered across CRM fields, meeting transcripts, emails, notes, calendar events, and random documents.
 
 Without a governed context layer, agents can't answer the most critical questions:
 
@@ -81,10 +81,10 @@ Without a governed context layer, agents can't answer the most critical question
 - Does this customer email, CRM update, or record change need human approval?
 - What proof should exist after the agent acts?
 
-CRMy answers these questions for your agents. Instead of dumping raw records into a prompt, it gives the agent only the customer facts that hold up to evidence, the warnings and policy it needs, and clear boundaries on what it may do. Then it records what happened. In short, CRMy turns raw customer input into safe, provable agent action:
+CRMy answers these questions for your agents. Instead of dumping raw records into a prompt, it gives the agent evidence-backed customer context, the warnings and policy it needs, and clear boundaries on what it may do. Then it records what happened. In short, CRMy turns raw customer input into safe, provable agent action:
 
 ```text
-Messy customer data  ->  trusted facts  ->  safe agent actions  ->  proof for every step
+Messy customer data  ->  governed context  ->  safe agent actions  ->  proof for every step
 ```
 
 Want proof? Try the <a href="#local-demo">local demo</a> below to see an agent resolve a customer, get a governed briefing, check what is safe to act on, and prove lineage.
@@ -93,11 +93,11 @@ CRMy is built for teams creating customer-facing agents that need to work safely
 
 | Agent need | What CRMy provides |
 |---|---|
-| Extract customer facts from messy inputs | Turn transcripts, notes, emails, meetings, CRM changes, REST, CLI, MCP, and UI inputs into structured Raw Context and Signals. |
+| Extract customer facts from messy inputs | Turn transcripts, notes, emails, meetings, CRM changes, REST, CLI, MCP, and UI inputs into structured Sources and Signals. |
 | Validate before agents rely on it | Keep inferred Signals separate from confirmed Memory until evidence, readiness, policy, and source grounding say they are safe. |
 | Flag context that has gone stale | Carry review dates on time-sensitive facts and surface stale warnings before an agent acts, so it doesn't treat last quarter's context as current. |
 | Decide whether an agent can act | Return readiness, policy checks, source authority, review requirements, Handoffs, writeback previews, and audit receipts. |
-| Send the right context, not the whole database | Return a ranked, evidence-backed briefing scoped to the next action, with relevant facts and proof instead of a data dump. |
+| Send the right context, not the whole database | Return a ranked, evidence-backed briefing scoped to the next action, with relevant claims and proof instead of a data dump. |
 | Fit any agent stack | Use MCP-first tools with REST, CLI, and Web UI surfaces over the same PostgreSQL-backed engine. |
 
 CRMy does not replace your CRM, warehouse, mailbox, calendar, support desk, or sales methodology. Those systems remain where work happens and state is stored. CRMy makes that state agent-operable.
@@ -244,7 +244,7 @@ flowchart LR
   F[Agent Action]
   G[Handoff or Review]
   H[Audit and Lineage]
-  K[Knowledge Claims]
+  K[Trusted Facts]
 
   A --> B
   B --> C
@@ -264,10 +264,10 @@ flowchart LR
 
 CRMy keeps customer context useful without pretending messy source material is instantly true.
 
-- **Sources** is source material before extraction: transcripts, emails, notes, meetings, CRM changes, docs, support/product signals, and agent inputs.
+- **Sources** are source material before extraction: transcripts, emails, notes, meetings, CRM changes, docs, support/product signals, and agent inputs.
 - **Signals** are inferred claims with evidence, confidence, source lineage, and readiness.
 - **Memory** is evidence-backed customer context that has cleared CRMy's checks, so agents can rely on it across sessions. Time-sensitive Memory carries a review date and surfaces stale warnings, so aging context gets re-checked instead of silently being treated as current.
-- **Knowledge Claims** are the optional governed retrieval boundary for approved company, product, pricing, security, implementation, and competitive claims. They keep shared business and product truth separate from customer Memory while giving agents cited claims they can safely use.
+- **Trusted Facts** are the optional governed retrieval boundary for approved company, product, pricing, security, implementation, and competitive facts. They keep shared business and product knowledge separate from customer Memory while giving agents cited facts they can safely use.
 - **Briefings** answer: what should the agent know?
 - **Action Context** answers: is this action ready, allowed, risky, stale, or review-required?
 - **Handoffs and Writeback** keep approval, idempotency, audit, and execution receipts in the path when work touches a customer or system of record.
@@ -299,26 +299,28 @@ Safe to act?
 
 | Capability | What it does |
 |---|---|
-| **Raw Context ingestion** | Accept messy notes, transcripts, emails, meetings, sync records, agent inputs, and custom source metadata. |
+| **Source ingestion** | Accept messy notes, transcripts, emails, meetings, sync records, agent inputs, and custom source metadata. |
 | **Transcript & notes drops** | Watch S3-compatible buckets or local self-hosted folders for transcripts/notes, match them to meetings or records, and keep unmatched files in review. |
 | **Signals and Memory** | Extract inferred claims with evidence, then promote durable Memory only when readiness, policy, and source grounding allow it. |
 | **Memory freshness** | Carry review dates on time-sensitive facts and surface stale warnings, so aging context gets re-checked instead of silently being treated as current. |
 | **Customer briefings** | Retrieve Current Memory, recent activity, open Handoffs, stale warnings, and unresolved Signals before analysis. |
 | **Action Context** | Return readiness, policy, warnings, source authority, review requirements, and audit metadata before customer-facing or record-changing work. |
-| **Knowledge Claims** | Retrieve approved, source-grounded company, product, pricing, implementation, security, and competitive claims without mixing shared business truth into customer Memory. Admins can govern claim freshness, approval, external-use eligibility, and conflicts. |
+| **Trusted Facts** | Retrieve approved, source-backed product, pricing, implementation, security, competitive, and company facts without mixing shared business context into customer Memory. Admins can govern freshness, approval, external-use eligibility, and conflicts. |
 | **Handoffs and approvals** | Route uncertain, sensitive, or governed work to humans with evidence attached. |
-| **Lineage and audit** | Trace source material into Signals, Memory, actions, reviews, writebacks, and receipts. Knowledge retrieval receipts prove which claims were used or excluded. |
+| **Lineage and audit** | Trace source material into Signals, Memory, actions, reviews, writebacks, and receipts. Knowledge retrieval receipts prove which Trusted Facts were used or excluded. |
 | **Email and calendar context** | Connect actor mailboxes/calendars for customer communication, meeting context, availability-aware suggestions, and sender-aware email actions. |
 | **Systems of record** | Configure CRM/warehouse sync and governed writeback through mappings, previews, approvals, and receipts. |
 | **MCP, CLI, REST, UI** | Use the same engine from agent tools, scripts, integrations, and the web app. |
 
-## The right context, not the whole database
+## How CRMy Reduces Token Use
 
 Most agents fail on customer work because they get *too much unverified data*, not too little. CRMy sends the agent a ranked, evidence-backed packet scoped to the next action instead of dumping the customer database into the prompt.
 
 - It separates what's confirmed from what's still an unresolved Signal, a stale warning, or a risky claim, so the agent knows what it can rely on.
 - It retrieves by action through `briefing_get` and `action_context_get`, ranks the highest-value context first, and reports what it left out.
-- It attaches source evidence by default, with full Lineage and Raw Context available on demand.
+- It attaches source evidence by default, with full Lineage and Source receipts available on demand.
+- Agents can choose budget profiles (`tiny`, `standard`, `deep`, `evidence_heavy`) when they need a tighter or deeper packet.
+- Evidence can travel as compact summaries by setting `evidence_mode: "summary"` while still preserving lineage for inspection.
 
 Advanced users can tune what gets packed (context radius, token budget, evidence detail) and narrow the tool set per session, but sensible defaults mean you rarely need to.
 
@@ -396,7 +398,7 @@ See [MCP tools](docs/mcp-tools.md) for the full tool catalog and scoped-access m
 
 ## CLI And REST
 
-Friendly CLI commands cover setup, demos, Raw Context ingestion, activity/email review, systems, knowledge retrieval, and operational QA.
+Friendly CLI commands cover setup, demos, Source ingestion, activity/email review, systems, knowledge retrieval, and operational QA.
 
 ```bash
 crmy init
@@ -509,7 +511,7 @@ Common timeout controls:
 
 See [`.env.example`](.env.example) for the full reference, including hosted OAuth, mailbox/calendar, semantic retrieval, rate limits, MCP session routing, provider timeouts, and connector settings.
 
-Before claiming live Google or Microsoft mailbox/calendar support for a production tenant, run the [0.9.3 provider certification checklist](docs/provider-certification-0.9.3.md). Automated tests cover CRMy's contracts and failure handling; live provider certification verifies real OAuth consent, sync, draft, send, reply, calendar, and availability behavior against a sandbox or production app.
+Before claiming live Google or Microsoft mailbox/calendar support for a production tenant, run the [provider certification checklist](docs/provider-certification-0.9.4.md). Automated tests cover CRMy's contracts and failure handling; live provider certification verifies real OAuth consent, sync, draft, send, reply, calendar, and availability behavior against a sandbox or production app.
 
 ## Develop From Source
 
@@ -581,7 +583,7 @@ Recipes:
 
 ## Release
 
-Current version: `0.9.3`
+Current version: `0.9.4`
 
 Release notes live in [RELEASE_NOTES.md](RELEASE_NOTES.md). Older release notes live in [CHANGELOG.md](CHANGELOG.md).
 

@@ -61,7 +61,7 @@ export interface ToolsetDefinition {
 export const TOOLSET_DEFINITIONS: Record<string, ToolsetDefinition> = {
   standard: {
     description:
-      'Common customer-reasoning loop: resolve a record, brief, ingest Raw Context, review Signals, draft outreach/records, and check outcomes. Sensible lean default for most agents.',
+      'Common customer-reasoning loop: resolve a record, brief, ingest Source, review Signals, draft outreach/records, and check outcomes. Sensible lean default for most agents.',
     tools: [
       'action_context_request_human_unblock',
       'context_get',
@@ -102,12 +102,12 @@ export const TOOLSET_DEFINITIONS: Record<string, ToolsetDefinition> = {
     ],
   },
   ingest: {
-    description: 'Send transcripts, emails, notes, and research through Raw Context ingestion and inspect processing receipts.',
+    description: 'Send transcripts, emails, notes, and research through Source ingestion and inspect processing receipts.',
     tools: [
       'context_ingest_auto',
       'context_ingest',
-      'context_raw_source_get',
-      'context_raw_source_list',
+      'context_source_get',
+      'context_source_list',
       'context_signal_group_list',
     ],
   },
@@ -148,11 +148,48 @@ export const TOOLSET_DEFINITIONS: Record<string, ToolsetDefinition> = {
       'knowledge_retrieve',
     ],
   },
-  product_knowledge: {
-    description: 'Retrieve governed product, pricing, implementation, security, and competitive knowledge to ground customer-facing claims.',
+  knowledge: {
+    description: 'Retrieve governed product, pricing, implementation, security, and competitive knowledge to ground customer-facing statements.',
     tools: [
       'knowledge_retrieve',
       'email_draft_preview',
+    ],
+  },
+  legacy_workflows: {
+    description: 'Opt-in experimental workflow-builder tools. Not part of the default Core Profile.',
+    tools: [
+      'workflow_create',
+      'workflow_get',
+      'workflow_update',
+      'workflow_delete',
+      'workflow_list',
+      'workflow_run_list',
+      'workflow_test',
+      'workflow_clone',
+      'workflow_trigger',
+      'workflow_run_replay',
+      'workflow_template_list',
+    ],
+  },
+  legacy_sequences: {
+    description: 'Opt-in experimental sequence tools. Not part of the default Core Profile.',
+    tools: [
+      'sequence_create',
+      'sequence_get',
+      'sequence_update',
+      'sequence_delete',
+      'sequence_list',
+      'sequence_enroll',
+      'sequence_unenroll',
+      'sequence_pause',
+      'sequence_resume',
+      'sequence_advance',
+      'sequence_enrollment_get',
+      'sequence_enrollment_context',
+      'sequence_enrollment_list',
+      'sequence_draft_step',
+      'sequence_analytics',
+      'sequence_clone',
     ],
   },
   record_update: {

@@ -1,4 +1,4 @@
--- Governed Product Knowledge Retrieval: claim envelopes + retrieval receipts.
+-- Trusted Facts Retrieval: claim envelopes + retrieval receipts.
 -- Product knowledge is a governed sibling namespace to customer Memory. Claims
 -- are source-derived envelopes (provenance, grounding, freshness, approval,
 -- visibility, conflict). Retrieval receipts are durable proof of what an agent

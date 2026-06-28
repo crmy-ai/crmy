@@ -109,7 +109,7 @@ export function emailsCommand(): Command {
     });
 
   cmd.command('process <id>')
-    .description('Process a customer email message as Raw Context')
+    .description('Process a customer email message as a Source')
     .action(async (id) => {
       const client = await getClient();
       const messageId = await resolveEmailMessageId(client, id);

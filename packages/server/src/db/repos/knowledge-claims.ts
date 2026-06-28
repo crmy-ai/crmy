@@ -136,7 +136,7 @@ export interface UpsertKnowledgeClaimInput {
   metadata?: Record<string, unknown>;
 }
 
-/** Fetch a single claim envelope by id (tenant-scoped). */
+/** Fetch a single Trusted Fact by id (tenant-scoped). */
 export async function getKnowledgeClaim(
   db: DbPool,
   tenantId: string,
@@ -173,7 +173,7 @@ export interface ListKnowledgeClaimsOptions {
   limit?: number;
 }
 
-/** List claim envelopes for the admin governance/review queue. */
+/** List Trusted Facts for the admin governance/review queue. */
 export async function listKnowledgeClaims(
   db: DbPool,
   tenantId: string,
@@ -231,7 +231,7 @@ export interface ReviewKnowledgeClaimPatch {
   touch_verified?: boolean;
 }
 
-/** Apply a governance review patch to a claim envelope. Returns the updated row. */
+/** Apply a governance review patch to a Trusted Fact. Returns the updated row. */
 export async function reviewKnowledgeClaim(
   db: DbPool,
   tenantId: string,
@@ -383,7 +383,7 @@ export async function markKnowledgeClaimsStale(
   return result.rowCount ?? 0;
 }
 
-/** Insert or (by external_key) update a claim envelope. Used by admins and, later, source adapters. */
+/** Insert or (by external_key) update a Trusted Fact. Used by admins and, later, source adapters. */
 export async function upsertKnowledgeClaim(
   db: DbPool,
   tenantId: string,

@@ -236,7 +236,7 @@ const lines = [
   { kind: 'cmd', text: '$ crmy context lineage --subject "account:Northstar Labs"' },
   { kind: 'dim', text: '' },
   { kind: 'ok', text: '✓ Lineage returned 74 nodes, 459 edges, 0 pending outcomes' },
-  { kind: 'out', text: 'Raw Context → Signals → Memory → Action Context → audit receipts' },
+  { kind: 'out', text: 'Sources → Signals → Memory → Action Context → audit receipts' },
   { kind: 'dim', text: '' },
   { kind: 'cmd', text: '$ claude mcp add crmy -- crmy mcp' },
 ];

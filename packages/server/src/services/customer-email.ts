@@ -45,7 +45,7 @@ export interface NormalizedEmailInput {
 export interface EmailProcessingResult {
   message: emailMessageRepo.EmailMessage;
   activity_id?: string | null;
-  raw_context_source_id?: string | null;
+  source_id?: string | null;
   classification: emailMessageRepo.EmailClassification;
   processing_status: emailMessageRepo.EmailProcessingStatus;
   processing_reason?: string | null;
@@ -538,7 +538,7 @@ export async function processEmailMessage(
   if (message.classification === 'internal' || message.classification === 'automated') {
     const updated = await emailMessageRepo.updateEmailMessage(db, tenantId, message.id, {
       processing_status: 'skipped',
-      processing_reason: 'Internal or automated email is not processed as Raw Context by default.',
+      processing_reason: 'Internal or automated email is not processed as a Source by default.',
     });
     return {
       message: updated ?? message,
@@ -552,7 +552,7 @@ export async function processEmailMessage(
   if (!subject.subject_type || !subject.subject_id) {
     const updated = await emailMessageRepo.updateEmailMessage(db, tenantId, message.id, {
       processing_status: 'needs_review',
-      processing_reason: 'Link this email to a customer record before processing it as Raw Context.',
+      processing_reason: 'Link this email to a customer record before processing it as a Source.',
     });
     return {
       message: updated ?? message,
@@ -566,7 +566,7 @@ export async function processEmailMessage(
     processing_status: 'processing',
     processing_reason: message.direction === 'outbound'
       ? 'Processing delivered outbound email as account activity and CRMy-authored context.'
-      : 'Processing email as Raw Context.',
+      : 'Processing email as a Source.',
   });
 
   try {
@@ -633,7 +633,7 @@ export async function processEmailMessage(
         memory_created: extraction.memory_created,
         signals_created: extraction.signals_created,
         skipped: extraction.skipped,
-        raw_context_source_id: rawSource?.id ?? null,
+        source_id: rawSource?.id ?? null,
         context_origin: provenance.context_origin,
         source_authorship: provenance.source_authorship,
         customer_authored: provenance.customer_authored,
@@ -649,7 +649,7 @@ export async function processEmailMessage(
       objectId: message.id,
       afterData: {
         activity_id: activity.id,
-        raw_context_source_id: rawSource?.id ?? null,
+        source_id: rawSource?.id ?? null,
         memory_created: extraction.memory_created,
         signals_created: extraction.signals_created,
       },
@@ -658,7 +658,7 @@ export async function processEmailMessage(
     return {
       message: updated ?? message,
       activity_id: activity.id,
-      raw_context_source_id: rawSource?.id ?? null,
+      source_id: rawSource?.id ?? null,
       classification: message.classification,
       processing_status: updated?.processing_status ?? status,
       processing_reason: updated?.processing_reason,

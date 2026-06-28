@@ -67,7 +67,7 @@ export interface EmailMessage {
   opportunity_id?: UUID | null;
   use_case_id?: UUID | null;
   activity_id?: UUID | null;
-  raw_context_source_id?: UUID | null;
+  source_id?: UUID | null;
   email_id?: UUID | null;
   extraction_receipt: Record<string, unknown>;
   metadata: Record<string, unknown>;
@@ -164,7 +164,11 @@ function normalizeDomain(domain: string): string {
 }
 
 function rowToMessage(row: Record<string, unknown>): EmailMessage {
-  return row as unknown as EmailMessage;
+  const { raw_context_source_id, ...message } = row;
+  return {
+    ...message,
+    source_id: (message.source_id ?? raw_context_source_id ?? null) as UUID | null,
+  } as unknown as EmailMessage;
 }
 
 export async function listMailboxConnections(

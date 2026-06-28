@@ -17,7 +17,7 @@ Use CRMy to:
 
 - Get a one-call briefing before acting on a customer record.
 - Search and update contacts, accounts, opportunities, use cases, activities, context entries, assignments, and HITL requests.
-- Ingest messy customer context as Raw Context, then review Signals before they become Memory.
+- Ingest messy customer context as Sources, then review Signals before they become Memory.
 - Route work to humans or agents through assignments and approval requests.
 - Check audit events and operations health when trust matters.
 
@@ -112,7 +112,7 @@ crmy({
 })
 ```
 
-For transcripts, emails, notes, call debriefs, research, or any messy source material, use Raw Context ingestion:
+For transcripts, emails, notes, call debriefs, research, or any messy source material, use Source ingestion:
 
 ```js
 crmy({
@@ -172,7 +172,7 @@ crmy({ action: "hitl.status", params: { id: "<hitl-request-id>" } })
 | `briefing.get` | `subject_type`, `subject_id` | Supports `context_radius`, `token_budget`, `context_types`, `include_stale`, `format` |
 | `action_context.get` | `subject_type`, `subject_id` | Returns readiness, source posture, recommended actions, review requirements, and proof |
 | `action_context.unblock` | `subject_type`, `subject_id` | Creates a HITL approval or assignment from Action Context human-unblock guidance |
-| `context.lineage` | one subject or artifact id | Trace Raw Context through Signals, Memory, Handoffs, writebacks, audit, and outcome rollups |
+| `context.lineage` | one subject or artifact id | Trace Sources through Signals, Memory, Handoffs, writebacks, audit, and outcome rollups |
 
 Subject types: `contact`, `account`, `opportunity`, `use_case`.
 
@@ -210,7 +210,7 @@ Prefer `subject_type` + `subject_id`. Use `detail` for structured extras like at
 | `context.signal_groups`, `context.signal_group.get` | Review grouped Signals with evidence and readiness |
 | `context.search` | Keyword search |
 | `context.semantic_search` | Semantic memory search when pgvector is enabled |
-| `context.ingest_auto` | Ingest messy Raw Context and let CRMy extract Signals and Memory readiness |
+| `context.ingest_auto` | Ingest source material and let CRMy extract Signals and Memory readiness |
 | `context.add` | Advanced direct Memory or Signal write |
 | `context.supersede` | Replace stale/wrong context while preserving audit history |
 | `context.stale` | Find expired context |

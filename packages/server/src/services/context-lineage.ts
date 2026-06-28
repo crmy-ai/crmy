@@ -9,7 +9,7 @@ export interface ContextLineageQuery {
   subject_id?: string;
   context_entry_id?: string;
   signal_group_id?: string;
-  raw_context_source_id?: string;
+  source_id?: string;
 }
 
 function addNode(nodes: Map<string, ContextLineageNode>, node: ContextLineageNode): void {
@@ -299,10 +299,10 @@ export async function getContextLineage(
     contextParams.push(query.subject_type);
     contextConditions.push(`subject_id = $${idx++}`);
     contextParams.push(query.subject_id);
-  } else if (query.raw_context_source_id) {
+  } else if (query.source_id) {
     const source = await db.query(
       `SELECT * FROM raw_context_sources WHERE tenant_id = $1 AND id = $2`,
-      [tenantId, query.raw_context_source_id],
+      [tenantId, query.source_id],
     );
     const row = source.rows[0];
     if (row?.subject_type && row?.subject_id) {
@@ -327,7 +327,7 @@ export async function getContextLineage(
     }
   }
 
-  if (contextConditions.length === 1 && !query.signal_group_id && !query.raw_context_source_id) {
+  if (contextConditions.length === 1 && !query.signal_group_id && !query.source_id) {
     contextConditions.push('created_at > now() - interval \'30 days\'');
   }
 
@@ -360,7 +360,7 @@ export async function getContextLineage(
       display_order: type === 'memory' ? 30 : 20,
       description: type === 'memory'
         ? 'Confirmed Memory that agents can retrieve into Active Context.'
-        : 'Evidence-backed Signal extracted from Raw Context.',
+        : 'Evidence-backed Signal extracted from Source.',
       data: entry,
     });
     if (uuidLike(entry.source_activity_id)) activityIds.add(entry.source_activity_id);
@@ -448,7 +448,7 @@ export async function getContextLineage(
         display_order: type === 'memory' ? 30 : 20,
         description: type === 'memory'
           ? 'Confirmed Memory that agents can retrieve into Active Context.'
-          : 'Evidence-backed Signal extracted from Raw Context.',
+          : 'Evidence-backed Signal extracted from Source.',
         data: entry,
       });
       if (uuidLike(entry.source_activity_id)) activityIds.add(entry.source_activity_id);
@@ -511,9 +511,9 @@ export async function getContextLineage(
   const rawConditions = ['tenant_id = $1'];
   const rawParams: unknown[] = [tenantId];
   let rawIdx = 2;
-  if (query.raw_context_source_id) {
+  if (query.source_id) {
     rawConditions.push(`id = $${rawIdx++}`);
-    rawParams.push(query.raw_context_source_id);
+    rawParams.push(query.source_id);
   } else if (query.subject_type && query.subject_id) {
     rawConditions.push(`subject_type = $${rawIdx++}`);
     rawParams.push(query.subject_type);
@@ -536,7 +536,7 @@ export async function getContextLineage(
     addNode(nodes, {
       id: `raw:${source.id}`,
       type: 'raw_context',
-      label: label(source.source_label, source.source_type ?? 'Raw Context'),
+      label: label(source.source_label, source.source_type ?? 'Source'),
       timestamp: source.created_at,
       status: source.status,
       subject_type: source.subject_type,

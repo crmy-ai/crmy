@@ -123,6 +123,7 @@ export const ContextEntryRecord = registry.register(
     confidence: z.number().optional(),
     tags: z.array(z.string()),
     is_current: z.boolean(),
+    grounding_method: S.contextGroundingMethod.optional(),
     valid_until: z.string().optional(),
     created_at: z.string(),
   }),
@@ -417,6 +418,7 @@ const actionContextRecommendedAction = registry.register('ActionContextRecommend
 }));
 
 const actionContextActionPacket = registry.register('ActionContextActionPacket', z.object({
+  version: z.literal('crmy.action_context.v1'),
   action_type: actionContextProposedActionType.optional(),
   objective: z.string(),
   status: actionContextStatus,
@@ -597,7 +599,7 @@ export const ActorConnectionSummary = registry.register(
       connected_calendar_count: z.number().int(),
       email_processed_count: z.number().int().optional(),
       calendar_processed_count: z.number().int().optional(),
-      raw_context_source_count: z.number().int().optional(),
+      source_count: z.number().int().optional(),
       signal_count: z.number().int().optional(),
       memory_count: z.number().int().optional(),
     })),

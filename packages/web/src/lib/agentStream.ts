@@ -84,7 +84,7 @@ export type AgentAttachmentSummary = {
   text_excerpt?: string | null;
   truncated?: boolean;
   raw_context_result?: unknown;
-  raw_context_source_id?: string | null;
+  source_id?: string | null;
   consumed_at?: string | null;
   error_message?: string | null;
   created_at: string;

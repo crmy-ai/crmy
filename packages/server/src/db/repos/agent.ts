@@ -20,6 +20,11 @@ function normalizeConfig(row: AgentConfig | undefined): AgentConfig | null {
     ...row,
     llm_timeout_ms: row.llm_timeout_ms ?? 60_000,
     signal_source_quality: row.signal_source_quality ?? { high: 1.0, medium: 0.9, lower: 0.75, fallback: 0.85 },
+    model_certification_status: row.model_certification_status ?? 'uncertified',
+    model_certification_profile: row.model_certification_profile ?? null,
+    model_certification_run_id: row.model_certification_run_id ?? null,
+    model_certification_score: row.model_certification_score ?? null,
+    model_certified_at: row.model_certified_at ?? null,
   };
 }
 

@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// Phase 6 (freshness) + Phase 7 (governance) for Governed Product Knowledge.
+// Phase 6 (freshness) + Phase 7 (governance) for Trusted Facts.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -217,7 +217,7 @@ test('governance tools are registered admin-tier with knowledge scopes', () => {
   assert.deepEqual(getToolScopeRequirements('knowledge_conflicts_detect'), ['knowledge:write']);
 });
 
-test('product knowledge mutation tools expose idempotency keys for safe retries', () => {
+test('Trusted Fact mutation tools expose idempotency keys for safe retries', () => {
   const byName = new Map(getAllTools(new FakeGovDb()).map(t => [t.name, t]));
   for (const name of ['knowledge_claim_upsert', 'knowledge_claim_review', 'knowledge_conflicts_detect']) {
     assert.ok(byName.get(name).inputSchema.shape.idempotency_key, `${name} accepts idempotency_key`);

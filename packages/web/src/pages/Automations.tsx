@@ -25,19 +25,19 @@ export default function AutomationsPage() {
   };
 
   const TABS: { key: AutomationsTab; label: string; Icon: typeof Zap }[] = [
-    { key: 'triggers',  label: 'Action Rules',  Icon: Zap },
-    { key: 'sequences', label: 'Sequences', Icon: ListOrdered },
+    { key: 'triggers',  label: 'Experimental Rules',  Icon: Zap },
+    { key: 'sequences', label: 'Experimental Sequences', Icon: ListOrdered },
   ];
 
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title="Advanced Automation"
+        title="Experimental Automation"
         icon={Zap}
         iconClassName="text-amber-500"
         description={tab === 'triggers'
-          ? headerDescription('Route customer and system events to governed actions', triggerCount, 'rule')
-          : headerDescription('Coordinate governed customer engagement experiments', sequenceCount, 'sequence')}
+          ? headerDescription('Test governed event routing before relying on it operationally', triggerCount, 'rule')
+          : headerDescription('Test governed customer engagement orchestration', sequenceCount, 'sequence')}
       />
 
       {/* Email-style tab bar */}

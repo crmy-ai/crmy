@@ -1165,7 +1165,7 @@ function ScopedOverviewDashboard() {
               </p>
             </div>
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {memoryTotal.toLocaleString()} Memory · {signalGroupTotal.toLocaleString()} Signals · {observationsTotal.toLocaleString()} Raw Context
+              {memoryTotal.toLocaleString()} Memory · {signalGroupTotal.toLocaleString()} Signals · {observationsTotal.toLocaleString()} Sources
             </span>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1">
@@ -1493,9 +1493,9 @@ function AdminDashboard() {
   const proofPathSteps = [
     {
       icon: FileText,
-      label: 'Raw Context',
+      label: 'Sources',
       value: observationsTotal.toLocaleString(),
-      detail: 'Notes, transcripts, emails, research, or agent input enter as source material.',
+      detail: 'Notes, transcripts, emails, research, or agent input enter as Sources.',
       href: '/context?tab=observations&add=context',
       color: 'bg-[#0ea5e9]/15 text-[#0ea5e9]',
     },
@@ -1511,7 +1511,7 @@ function AdminDashboard() {
       icon: Library,
       label: 'Memory',
       value: memoryTotal.toLocaleString(),
-      detail: 'Confirmed, evidenced customer facts become trusted Memory agents can rely on.',
+      detail: 'Confirmed, evidenced customer context becomes Memory agents can rely on.',
       href: '/context?tab=browser',
       color: 'bg-emerald-500/15 text-emerald-500',
     },
@@ -1533,7 +1533,7 @@ function AdminDashboard() {
         title="Overview"
         icon={Brain}
         iconClassName="text-primary"
-        description="Watch Raw Context become confirmed Memory that agents retrieve into Active Context."
+        description="Watch Sources become Signals, Memory, and Action Context for agents."
       />
 
       <div className="flex items-center justify-between gap-3 overflow-x-auto border-b border-border px-4 pt-4 md:px-6">
@@ -1694,7 +1694,7 @@ function AdminDashboard() {
                 </Link>
                 <Link to="/automations" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                   <Zap className="h-3.5 w-3.5" />
-                  Automations
+                  Experiments
                 </Link>
               </div>
             </div>

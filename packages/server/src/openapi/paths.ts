@@ -531,7 +531,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/activities/{id}/context',
   tags: ['Activities'],
-  summary: 'Extract or attach Raw Context from an activity',
+  summary: 'Extract or attach Source from an activity',
   security: bearer,
   request: {
     params: idParam,
@@ -887,9 +887,9 @@ registry.registerPath({
 });
 
 registry.registerPath({
-  method: 'get', path: '/context/raw-sources',
+  method: 'get', path: '/context/sources',
   tags: ['Context'],
-  summary: 'List Raw Context processing records',
+  summary: 'List Source processing records',
   security: bearer,
   request: {
     query: z.object({
@@ -905,18 +905,18 @@ registry.registerPath({
 });
 
 registry.registerPath({
-  method: 'get', path: '/context/raw-sources/{id}',
+  method: 'get', path: '/context/sources/{id}',
   tags: ['Context'],
-  summary: 'Get a Raw Context processing record',
+  summary: 'Get a Source processing record',
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(GenericObject), 404: err404 },
 });
 
 registry.registerPath({
-  method: 'post', path: '/context/raw-sources/{id}/reprocess',
+  method: 'post', path: '/context/sources/{id}/reprocess',
   tags: ['Context'],
-  summary: 'Reprocess a Raw Context source',
+  summary: 'Reprocess a Source',
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
@@ -925,7 +925,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/context/ingest',
   tags: ['Context'],
-  summary: 'Ingest Raw Context for a known record',
+  summary: 'Ingest a Source for a known record',
   security: bearer,
   request: {
     body: jsonBody(z.object({
@@ -943,7 +943,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/context/ingest-auto',
   tags: ['Context'],
-  summary: 'Ingest Raw Context and automatically resolve mentioned records',
+  summary: 'Ingest a Source and automatically resolve mentioned records',
   security: bearer,
   request: {
     body: jsonBody(z.object({
@@ -998,7 +998,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/knowledge/retrieve',
   tags: ['Knowledge'],
-  summary: 'Retrieve governed product/competitive knowledge for a customer action (optional, non-blocking)',
+  summary: 'Retrieve Trusted Facts for a customer action (optional, non-blocking)',
   security: bearer,
   request: { body: jsonBody(S.knowledgeRetrieve) },
   responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
@@ -1007,7 +1007,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/knowledge/claims/list',
   tags: ['Knowledge'],
-  summary: 'List knowledge claim envelopes for the admin review queue (governance)',
+  summary: 'List Trusted Facts for the admin review queue (governance)',
   security: bearer,
   request: { body: jsonBody(S.knowledgeClaimList) },
   responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
@@ -1016,7 +1016,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/knowledge/claims/review',
   tags: ['Knowledge'],
-  summary: 'Apply a governance review decision to a knowledge claim (approve/reject/deprecate/mark_stale/reactivate)',
+  summary: 'Apply a governance review decision to a Trusted Fact (approve/reject/deprecate/mark_stale/reactivate)',
   security: bearer,
   request: { body: jsonBody(S.knowledgeClaimReview) },
   responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
@@ -1025,10 +1025,82 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/knowledge/conflicts/detect',
   tags: ['Knowledge'],
-  summary: 'Detect competing knowledge claims with source-priority resolution (governance)',
+  summary: 'Detect competing Trusted Facts with source-priority resolution (governance)',
   security: bearer,
   request: { body: jsonBody(S.knowledgeConflictsDetect) },
   responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+const knowledgeSourceCreate = z.object({
+  name: z.string().min(1).max(200),
+  endpoint_url: z.string().min(1).max(2048),
+  transport: z.literal('streamable_http').optional(),
+  auth_type: z.enum(['none', 'bearer_token']).optional(),
+  token: z.string().optional().openapi({ description: 'Write-only credential for the external MCP source. Never returned by list/detail responses.' }),
+  description: z.string().max(1000).nullable().optional(),
+});
+
+const knowledgeSourcePatch = z.object({
+  name: z.string().min(1).max(200).optional(),
+  endpoint_url: z.string().min(1).max(2048).optional(),
+  transport: z.literal('streamable_http').optional(),
+  auth_type: z.enum(['none', 'bearer_token']).optional(),
+  token: z.string().nullable().optional().openapi({ description: 'Write-only replacement credential. Omit to keep the existing credential.' }),
+  description: z.string().max(1000).nullable().optional(),
+  status: z.enum(['configured', 'syncing', 'error', 'disabled']).optional(),
+});
+
+registry.registerPath({
+  method: 'get', path: '/knowledge/source-connections',
+  tags: ['Knowledge'],
+  summary: 'List MCP Knowledge Source connectors',
+  security: bearer,
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/knowledge/source-connections',
+  tags: ['Knowledge'],
+  summary: 'Create an MCP Knowledge Source connector with write-only external credentials',
+  security: bearer,
+  request: { body: jsonBody(knowledgeSourceCreate) },
+  responses: { 201: created(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/knowledge/source-connections/{id}',
+  tags: ['Knowledge'],
+  summary: 'Update an MCP Knowledge Source connector',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(knowledgeSourcePatch) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/knowledge/source-connections/{id}',
+  tags: ['Knowledge'],
+  summary: 'Delete an MCP Knowledge Source connector',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(z.object({ deleted: z.boolean() })), 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/knowledge/source-connections/{id}/test',
+  tags: ['Knowledge'],
+  summary: 'Test an MCP Knowledge Source connector',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/knowledge/source-connections/{id}/sync',
+  tags: ['Knowledge'],
+  summary: 'Sync Trusted Facts from an MCP Knowledge Source connector into governance',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(z.object({ limit: z.number().int().min(1).max(100).optional() }), false) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
 });
 
 registry.registerPath({
@@ -1044,12 +1116,14 @@ registry.registerPath({
   method: 'post', path: '/context/ingest-file',
   tags: ['Context'],
   summary: 'Extract text from a base64 file upload and detect mentioned customer records',
+  description: 'Requires context write access. The full extracted text is omitted by default and returned only when include_text is true.',
   security: bearer,
   request: {
     body: jsonBody(z.object({
       filename: z.string().min(1),
       data: z.string().min(1).openapi({ description: 'Base64-encoded file contents' }),
       source_label: z.string().optional(),
+      include_text: z.boolean().optional().openapi({ description: 'Return full extracted text for follow-on ingestion. Defaults to false.' }),
     })),
   },
   responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
@@ -1119,7 +1193,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'get', path: '/context/lineage',
   tags: ['Context'],
-  summary: 'Trace Raw Context through Signals, Memory, Handoffs, writebacks, and audit',
+  summary: 'Trace Sources through Signals, Memory, Handoffs, writebacks, and audit',
   security: bearer,
   request: {
     query: z.object({
@@ -1127,7 +1201,7 @@ registry.registerPath({
       subject_id: S.uuid.optional(),
       context_entry_id: S.uuid.optional(),
       signal_group_id: S.uuid.optional(),
-      raw_context_source_id: S.uuid.optional(),
+      source_id: S.uuid.optional(),
     }),
   },
   responses: { 200: ok(ContextLineageResponse), 401: err401 },
@@ -1636,7 +1710,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/calendar-events/{id}/process',
   tags: ['Calendar'],
-  summary: 'Process a calendar event as Raw Context',
+  summary: 'Process a calendar event as a Source',
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(GenericObject), 403: err403, 404: err404 },
@@ -1663,7 +1737,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/calendar-events/{id}/ignore',
   tags: ['Calendar'],
-  summary: 'Ignore a calendar event and skip Raw Context processing',
+  summary: 'Ignore a calendar event and skip Source processing',
   security: bearer,
   request: { params: idParam, body: jsonBody(z.object({ reason: z.string().optional() }), false) },
   responses: { 200: ok(GenericObject), 403: err403, 404: err404 },
@@ -2041,7 +2115,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/email-messages/{id}/process',
   tags: ['Emails'],
-  summary: 'Process a customer email message as Raw Context',
+  summary: 'Process a customer email message as a Source',
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(GenericObject), 404: err404 },
@@ -2050,7 +2124,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/email-messages/{id}/ignore',
   tags: ['Emails'],
-  summary: 'Ignore a customer email and skip Raw Context processing',
+  summary: 'Ignore a customer email and skip Source processing',
   security: bearer,
   request: { params: idParam, body: jsonBody(z.object({ reason: z.string().optional() }), false) },
   responses: { 200: ok(GenericObject), 403: err403, 404: err404 },

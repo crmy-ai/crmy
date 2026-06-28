@@ -332,8 +332,8 @@ async function main() {
         'customer_record_resolve',
         'context_ingest',
         'context_ingest_auto',
-        'context_raw_source_get',
-        'context_raw_source_list',
+        'context_source_get',
+        'context_source_list',
         'context_list',
         'context_signal_group_list',
         'context_signal_group_get',
@@ -435,7 +435,7 @@ async function main() {
         memory_created: out?.memory_created,
         signals_created: out?.signals_created,
         skipped: out?.skipped,
-        raw_context_source_id: out?.raw_context_source?.id ?? out?.processing_receipt?.raw_context_source_id,
+        source_id: out?.source?.id ?? out?.processing_receipt?.source_id,
       };
       if (Number(out?.extracted_count ?? 0) <= 0) {
         throw new Error(`No context extracted. Receipt: ${JSON.stringify(out?.processing_receipt ?? out)}`);
@@ -443,16 +443,16 @@ async function main() {
       return artifacts.known_ingest;
     }, { required: false });
 
-    const knownRawSourceId = artifacts.known_ingest?.raw_context_source_id
-      ?? knownIngestOut?.raw_context_source?.id
-      ?? knownIngestOut?.processing_receipt?.raw_context_source_id;
-    if (knownRawSourceId) {
-      const rawSourceId = knownRawSourceId;
-      artifacts.raw_context_source_id = rawSourceId;
-      await step('context_raw_source_get', async () => {
-        const out = await client.callTool('context_raw_source_get', { id: rawSourceId });
-        const source = out?.raw_context_source;
-        if (!source?.id) throw new Error('No raw_context_source returned.');
+    const knownSourceId = artifacts.known_ingest?.source_id
+      ?? knownIngestOut?.source?.id
+      ?? knownIngestOut?.processing_receipt?.source_id;
+    if (knownSourceId) {
+      const sourceId = knownSourceId;
+      artifacts.source_id = sourceId;
+      await step('context_source_get', async () => {
+        const out = await client.callTool('context_source_get', { id: sourceId });
+        const source = out?.source;
+        if (!source?.id) throw new Error('No source returned.');
         return {
           id: source.id,
           status: source.status,
@@ -463,16 +463,16 @@ async function main() {
         };
       }, { required: false });
     } else {
-      warnings.push('Known-subject ingest did not return a raw_context_source_id.');
+      warnings.push('Known-subject ingest did not return a source_id.');
     }
 
-    await step('context_raw_source_list_for_account', async () => {
-      const out = await client.callTool('context_raw_source_list', {
+    await step('context_source_list_for_account', async () => {
+      const out = await client.callTool('context_source_list', {
         subject_type: 'account',
         subject_id: account.id,
         limit: 20,
       });
-      return { total: out?.total, returned: out?.raw_context_sources?.length ?? 0 };
+      return { total: out?.total, returned: out?.sources?.length ?? 0 };
     }, { required: false });
 
     let signalList;
@@ -503,7 +503,7 @@ async function main() {
 
     let signalCandidate = firstEntry(signalList) ?? firstSignalFromIngest(knownIngestOut);
     if (!signalCandidate && Number(artifacts.memory_count_before_promotion ?? 0) <= 0) {
-      warnings.push('Raw Context extraction did not produce a current Signal; creating a direct evidence-backed Signal so promotion mechanics can still be tested.');
+      warnings.push('Source extraction did not produce a current Signal; creating a direct evidence-backed Signal so promotion mechanics can still be tested.');
       let directSignalOut;
       await step('context_add_fallback_signal', async () => {
         const out = await client.callTool('context_add', {
@@ -649,8 +649,8 @@ async function main() {
     }, { required: false });
 
     await step('context_lineage_get', async () => {
-      const input = artifacts.raw_context_source_id
-        ? { raw_context_source_id: artifacts.raw_context_source_id }
+      const input = artifacts.source_id
+        ? { source_id: artifacts.source_id }
         : { subject_type: 'account', subject_id: account.id };
       const out = await client.callTool('context_lineage_get', input);
       artifacts.lineage = {

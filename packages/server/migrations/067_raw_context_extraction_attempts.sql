@@ -1,4 +1,4 @@
--- Raw Context extraction attempt ledger
+-- Source extraction attempt ledger
 -- Up:
 
 CREATE TABLE IF NOT EXISTS raw_context_extraction_attempts (

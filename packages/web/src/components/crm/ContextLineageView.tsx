@@ -388,7 +388,7 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
     : {
       context_entry_id: searchParams.get('context_entry_id') ?? undefined,
       signal_group_id: searchParams.get('signal_group_id') ?? undefined,
-      raw_context_source_id: searchParams.get('raw_context_source_id') ?? undefined,
+      source_id: searchParams.get('source_id') ?? undefined,
     };
   const lineage = useContextLineage(lineageParams);
   const data = lineage.data?.lineage;
@@ -397,7 +397,7 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
     || urlSubject
     || searchParams.get('context_entry_id')
     || searchParams.get('signal_group_id')
-    || searchParams.get('raw_context_source_id'),
+    || searchParams.get('source_id'),
   );
   const visibleData = hasLineageTarget ? data : undefined;
 
@@ -696,7 +696,7 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
               )}
               <PhaseSection
                 title="Sources"
-                description="Raw customer context and activities that produced extracted Signals."
+                description="Sources and activities that produced extracted Signals."
                 nodes={nodesByPhase.sources}
                 edges={visibleEdges}
                 nodesById={nodesById}

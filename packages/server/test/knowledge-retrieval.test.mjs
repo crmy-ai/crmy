@@ -5,13 +5,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   retrieveKnowledge,
-  isProductKnowledgeConfigured,
+  isKnowledgeConfigured,
   selectClaims,
-  upsertProductKnowledgeClaim,
-  buildProductContext,
-  getProductContextForSubject,
+  upsertGovernedKnowledgeClaim,
+  buildKnowledgeContext,
+  getKnowledgeContextForSubject,
 } from '../dist/services/knowledge-retrieval.js';
-import { buildProductDraftPieces } from '../dist/services/email-drafts.js';
+import { buildKnowledgeDraftPieces } from '../dist/services/email-drafts.js';
 import { getAllTools, getToolsForActor } from '../dist/mcp/server.js';
 import { TOOLSET_DEFINITIONS, CORE_TOOLS } from '../dist/mcp/toolsets.js';
 import { getToolScopeRequirements, actorHasScope } from '../dist/auth/scopes.js';
@@ -101,7 +101,7 @@ test('ranks authoritative above secondary and respects limit', () => {
 
 test('not_configured when no claims exist (optional, non-blocking)', async () => {
   const db = new FakeKnowledgeDb([]);
-  assert.equal(await isProductKnowledgeConfigured(db, 't1'), false);
+  assert.equal(await isKnowledgeConfigured(db, 't1'), false);
   const result = await retrieveKnowledge(db, agent, { query: 'pricing' });
   assert.equal(result.status, 'not_configured');
   assert.ok(result.message);
@@ -134,13 +134,13 @@ test('retrieval degrades (not fails) on a backend error', async () => {
 test('upsert verifies grounding against source_text', async () => {
   const db = new FakeKnowledgeDb([]);
   const admin = { ...agent, role: 'admin', scopes: ['*'] };
-  await upsertProductKnowledgeClaim(db, admin, {
+  await upsertGovernedKnowledgeClaim(db, admin, {
     category: 'competitive_response', title: 'Lock-in', body: 'CRMy is open source and self-hostable.',
     source_text: 'Our docs note CRMy is open source and self-hostable under Apache-2.0.',
   });
   assert.equal(db.inserts[0][14], true, 'grounded should be true when body is supported by source_text');
 
-  await upsertProductKnowledgeClaim(db, admin, {
+  await upsertGovernedKnowledgeClaim(db, admin, {
     category: 'competitive_response', title: 'Lock-in', body: 'CRMy beats every competitor on price.',
     source_text: 'Our docs describe the context engine architecture.',
   });
@@ -150,7 +150,7 @@ test('upsert verifies grounding against source_text', async () => {
 test('upsert stores explicit knowledge_type metadata when supplied', async () => {
   const db = new FakeKnowledgeDb([]);
   const admin = { ...agent, role: 'admin', scopes: ['*'] };
-  await upsertProductKnowledgeClaim(db, admin, {
+  await upsertGovernedKnowledgeClaim(db, admin, {
     knowledge_type: 'company',
     category: 'positioning_overview',
     title: 'Company positioning',
@@ -183,21 +183,21 @@ test('knowledge_claim_upsert is admin-only; agents only see knowledge_retrieve',
   assert.ok(adminTools.has('knowledge_claim_upsert'));
 });
 
-test('knowledge_retrieve is in product_knowledge and customer_outreach toolsets; not in core', () => {
-  assert.ok(TOOLSET_DEFINITIONS.product_knowledge.tools.includes('knowledge_retrieve'));
+test('knowledge_retrieve is in knowledge and customer_outreach toolsets; not in core', () => {
+  assert.ok(TOOLSET_DEFINITIONS.knowledge.tools.includes('knowledge_retrieve'));
   assert.ok(TOOLSET_DEFINITIONS.customer_outreach.tools.includes('knowledge_retrieve'));
   assert.ok(!CORE_TOOLS.includes('knowledge_retrieve'));
 });
 
 // ---- Phase 3: briefing / Action Context enrichment ----
 
-test('buildProductContext categorizes claims, surfaces avoid_claims, and dedupes citations', () => {
+test('buildKnowledgeContext categorizes claims, surfaces avoid_claims, and dedupes citations', () => {
   const apiClaim = (over) => ({
     id: over.id, category: over.category, title: over.id.toUpperCase(), body: 'b', grounded: true,
     approval_status: 'approved', approved_for_external_use: true, visibility: 'external',
     citations: over.citations ?? [{ source_label: 'Doc', source_url: 'u' }],
   });
-  const pc = buildProductContext({
+  const pc = buildKnowledgeContext({
     status: 'available',
     claims: [
       apiClaim({ id: 'p', category: 'proof_point' }),
@@ -218,9 +218,9 @@ test('buildProductContext categorizes claims, surfaces avoid_claims, and dedupes
   assert.equal(pc.retrieval_receipt_id, 'r1');
 });
 
-test('getProductContextForSubject packages retrieval over the store', async () => {
+test('getKnowledgeContextForSubject packages retrieval over the store', async () => {
   const db = new FakeKnowledgeDb([claim({ id: 'ok', category: 'proof_point' })]);
-  const pc = await getProductContextForSubject(db, agent, {
+  const pc = await getKnowledgeContextForSubject(db, agent, {
     query: 'lock-in', subject_type: 'account', subject_id: '00000000-0000-0000-0000-000000000001',
   });
   assert.equal(pc.status, 'available');
@@ -228,22 +228,22 @@ test('getProductContextForSubject packages retrieval over the store', async () =
   assert.ok(pc.retrieval_receipt_id);
 });
 
-test('isProductKnowledgeConfigured is resilient: a throwing/unknown DB is treated as not configured', async () => {
+test('isKnowledgeConfigured is resilient: a throwing/unknown DB is treated as not configured', async () => {
   const throwing = { query: async () => { throw new Error('relation does not exist'); } };
-  assert.equal(await isProductKnowledgeConfigured(throwing, 't1'), false);
-  assert.equal(await isProductKnowledgeConfigured(new FakeKnowledgeDb([claim()]), 't1'), true);
+  assert.equal(await isKnowledgeConfigured(throwing, 't1'), false);
+  assert.equal(await isKnowledgeConfigured(new FakeKnowledgeDb([claim()]), 't1'), true);
 });
 
 // ---- Phase 4: email draft integration ----
 
-test('buildProductDraftPieces packages approved claims + proof, caps bodies, omits empty (Phase 4)', () => {
-  assert.equal(buildProductDraftPieces(undefined), undefined);
-  assert.equal(buildProductDraftPieces({
+test('buildKnowledgeDraftPieces packages approved claims + proof, caps bodies, omits empty (Phase 4)', () => {
+  assert.equal(buildKnowledgeDraftPieces(undefined), undefined);
+  assert.equal(buildKnowledgeDraftPieces({
     status: 'no_results', relevant_claims: [], proof_points: [], implementation_caveats: [],
     competitive_context: [], avoid_claims: [], warnings: [], citations: [],
   }), undefined, 'no claims and nothing to avoid -> nothing to surface');
 
-  const pieces = buildProductDraftPieces({
+  const pieces = buildKnowledgeDraftPieces({
     status: 'available',
     relevant_claims: [{ id: 'c1', category: 'proof_point', title: 'T', body: 'x'.repeat(500), grounded: true, approval_status: 'approved', approved_for_external_use: true, visibility: 'external', citations: [{ source_label: 'Doc' }] }],
     proof_points: [], implementation_caveats: [], competitive_context: [],
@@ -254,7 +254,7 @@ test('buildProductDraftPieces packages approved claims + proof, caps bodies, omi
   assert.equal(pieces.packet.claims[0].body.length, 320, 'claim body capped for token control');
   assert.deepEqual(pieces.packet.avoid, [{ id: 'bad', reason: 'ungrounded' }]);
   assert.ok(pieces.packet.note.includes('approved'));
-  assert.deepEqual(pieces.used.used_claim_ids, ['c1']);
+  assert.deepEqual(pieces.used.used_snippet_ids, ['c1']);
   assert.equal(pieces.used.excluded_count, 1);
   assert.equal(pieces.used.retrieval_receipt_id, 'r9');
 });

@@ -4,14 +4,14 @@
 import { Router, type Request, type Response } from 'express';
 import type { DbPool } from '../db/pool.js';
 import type { ActorContext, UUID } from '@crmy/shared';
-import { CrmyError, permissionDenied } from '@crmy/shared';
+import { CrmyError, permissionDenied, validationError } from '@crmy/shared';
 import * as agentRepo from '../db/repos/agent.js';
 import * as activityRepo from '../db/repos/agent-activity.js';
 import { encrypt, decrypt } from './crypto.js';
 import { callLLM } from './providers/llm.js';
 import { getToolsForActor } from '../mcp/server.js';
 import { getAllTools } from '../mcp/server.js';
-import { enforceToolScopes, getToolScopeRequirements } from '../auth/scopes.js';
+import { enforceToolScopes, getToolScopeRequirements, requireScopes } from '../auth/scopes.js';
 import { assertSubjectAccess, resolveOwnerFilter } from '../services/access-control.js';
 import { entityResolve } from '../services/entity-resolve.js';
 import * as accountRepo from '../db/repos/accounts.js';
@@ -32,6 +32,11 @@ import {
   verifyAgentToolCalling,
   type ReadinessResult,
 } from './readiness.js';
+import {
+  MODEL_CERTIFICATION_MIN_SCORE,
+  MODEL_CERTIFICATION_PROFILE,
+  modelCertificationMeetsAutoPromoteGate,
+} from '../services/model-certification.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -1079,6 +1084,7 @@ export function agentRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireAdmin(actor);
+      requireScopes(actor, 'agent:admin');
 
       const body = req.body as Record<string, unknown>;
       const existingConfig = await agentRepo.getConfig(db, actor.tenant_id);
@@ -1114,6 +1120,56 @@ export function agentRouter(db: DbPool): Router {
           next[key] = Number(Math.min(1, Math.max(0.4, raw[key])).toFixed(2));
         }
         update.signal_source_quality = next;
+      }
+      const allowManualCertification = process.env.NODE_ENV !== 'production'
+        && process.env.CRMY_ALLOW_MANUAL_MODEL_CERTIFICATION === 'true';
+      if (typeof body.model_certification_status === 'string'
+        && ['uncertified', 'certified', 'failed'].includes(body.model_certification_status)) {
+        if (body.model_certification_status === 'certified' && !allowManualCertification) {
+          throw validationError(
+            'Model certification cannot be set manually. Run the eval certification flow and attach a verified run before enabling auto-promotion.',
+          );
+        }
+        update.model_certification_status = body.model_certification_status;
+        update.model_certified_at = body.model_certification_status === 'certified'
+          ? new Date().toISOString()
+          : null;
+      }
+      if (typeof body.model_certification_profile === 'string') {
+        update.model_certification_profile = body.model_certification_profile.slice(0, 100);
+      }
+      if (typeof body.model_certification_run_id === 'string') {
+        update.model_certification_run_id = body.model_certification_run_id.slice(0, 200);
+      }
+      if (typeof body.model_certification_score === 'number') {
+        update.model_certification_score = Number(Math.min(1, Math.max(0, body.model_certification_score)).toFixed(3));
+      }
+
+      const modelIdentityChanged = existingConfig
+        ? (
+          (typeof body.provider === 'string' && body.provider !== existingConfig.provider)
+          || (typeof body.base_url === 'string' && body.base_url !== existingConfig.base_url)
+          || (typeof body.model === 'string' && body.model !== existingConfig.model)
+        )
+        : false;
+      if (modelIdentityChanged && update.model_certification_status === undefined) {
+        update.model_certification_status = 'uncertified';
+        update.model_certification_profile = null;
+        update.model_certification_run_id = null;
+        update.model_certification_score = null;
+        update.model_certified_at = null;
+      }
+      const nextCertification = {
+        model_certification_status: (update.model_certification_status ?? existingConfig?.model_certification_status ?? 'uncertified') as string,
+        model_certification_profile: (update.model_certification_profile ?? existingConfig?.model_certification_profile ?? null) as string | null,
+        model_certification_run_id: (update.model_certification_run_id ?? existingConfig?.model_certification_run_id ?? null) as string | null,
+        model_certification_score: (update.model_certification_score ?? existingConfig?.model_certification_score ?? null) as number | null,
+      };
+      if (nextCertification.model_certification_status === 'certified'
+        && !modelCertificationMeetsAutoPromoteGate(nextCertification)) {
+        throw validationError(
+          `Model certification requires a ${MODEL_CERTIFICATION_PROFILE} eval run id and score >= ${MODEL_CERTIFICATION_MIN_SCORE}.`,
+        );
       }
 
       // Encrypt API key if a new one was provided (non-empty string)
@@ -1496,21 +1552,21 @@ export function agentRouter(db: DbPool): Router {
             source_label: source_label ?? filename,
             confidence_threshold: 0.6,
           }, actor) as Record<string, unknown>;
-          const rawSource = result.raw_context_source as { id?: string } | undefined;
+          const source = result.source as { id?: string } | undefined;
           const updated = await agentRepo.updateAttachment(db, actor.tenant_id, attachment.id, {
             status: 'processed',
             raw_context_result: result,
-            raw_context_source_id: rawSource?.id ?? null,
+            raw_context_source_id: source?.id ?? null,
           });
           res.status(201).json({ data: redactAttachment(updated ?? attachment), result });
           return;
         } catch (err) {
           const updated = await agentRepo.updateAttachment(db, actor.tenant_id, attachment.id, {
             status: 'failed',
-            error_message: safeErrorMessage(err, 'Raw Context processing failed.'),
+            error_message: safeErrorMessage(err, 'Source processing failed.'),
           });
           res.status(400).json({
-            error: safeErrorMessage(err, 'Raw Context processing failed.'),
+            error: safeErrorMessage(err, 'Source processing failed.'),
             attachment: updated ? redactAttachment(updated) : redactAttachment(attachment),
           });
           return;

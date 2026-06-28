@@ -16,9 +16,9 @@ export async function createContextEntry(
   const result = await db.query(
     `INSERT INTO context_entries (tenant_id, subject_type, subject_id,
        context_type, authored_by, title, body, structured_data,
-       confidence, memory_status, evidence, tags, source, source_ref, source_activity_id, valid_until,
+       confidence, memory_status, evidence, tags, source, source_ref, source_activity_id, grounding_method, valid_until,
        parent_id, visibility, mentions, pinned)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
      RETURNING *`,
     [
       tenantId,
@@ -36,6 +36,7 @@ export async function createContextEntry(
       data.source ?? null,
       data.source_ref ?? null,
       data.source_activity_id ?? null,
+      data.grounding_method ?? 'lexical',
       data.valid_until ?? null,
       (data as Record<string, unknown>).parent_id ?? null,
       (data as Record<string, unknown>).visibility ?? 'internal',
@@ -389,6 +390,7 @@ export async function supersedeContextEntry(
     structured_data?: Record<string, unknown>;
     confidence?: number;
     tags?: string[];
+    grounding_method?: NonNullable<ContextEntry['grounding_method']>;
     authored_by: UUID;
   },
 ): Promise<{ old: ContextEntry; new: ContextEntry }> {
@@ -413,8 +415,8 @@ export async function supersedeContextEntry(
       `INSERT INTO context_entries (tenant_id, subject_type, subject_id,
          context_type, authored_by, title, body, structured_data,
          confidence, memory_status, evidence, tags, is_current, supersedes_id, source, source_ref,
-         source_activity_id, valid_until, visibility, mentions, pinned)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11,true,$12,$13,$14,$15,$16,$17,$18,$19)
+         source_activity_id, grounding_method, valid_until, visibility, mentions, pinned)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11,true,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        RETURNING *`,
       [
         tenantId,
@@ -432,6 +434,7 @@ export async function supersedeContextEntry(
         oldEntry.source,
         oldEntry.source_ref,
         oldEntry.source_activity_id,
+        newData.grounding_method ?? 'human_reviewed',
         oldEntry.valid_until ?? null,
         (oldEntry as unknown as Record<string, unknown>).visibility ?? 'internal',
         (oldEntry as unknown as Record<string, unknown>).mentions ?? [],
@@ -459,6 +462,7 @@ export async function reviewContextEntry(
     const result = await db.query(
       `UPDATE context_entries
        SET reviewed_at = now(),
+           grounding_method = 'human_reviewed',
            valid_until = now() + ($3 * INTERVAL '1 day'),
            updated_at  = now()
        WHERE id = $1 AND tenant_id = $2
@@ -468,7 +472,10 @@ export async function reviewContextEntry(
     return (result.rows[0] as ContextEntry) ?? null;
   }
   const result = await db.query(
-    `UPDATE context_entries SET reviewed_at = now(), updated_at = now()
+    `UPDATE context_entries
+     SET reviewed_at = now(),
+         grounding_method = 'human_reviewed',
+         updated_at = now()
      WHERE id = $1 AND tenant_id = $2
      RETURNING *`,
     [id, tenantId],
@@ -514,6 +521,8 @@ export async function promoteSignal(
     confidence?: number;
     tags?: string[];
     evidence?: Record<string, unknown>[];
+    grounding_method?: NonNullable<ContextEntry['grounding_method']>;
+    valid_until?: string;
   },
 ): Promise<ContextEntry | null> {
   const result = await db.query(
@@ -527,6 +536,8 @@ export async function promoteSignal(
          evidence = COALESCE($9::jsonb, evidence),
          promoted_at = now(),
          promoted_by = $3,
+         grounding_method = COALESCE($10, 'human_reviewed'),
+         valid_until = COALESCE($11, valid_until),
          rejected_at = NULL,
          rejected_by = NULL,
          rejection_reason = NULL,
@@ -543,6 +554,8 @@ export async function promoteSignal(
       patch?.confidence ?? null,
       patch?.tags ? JSON.stringify(patch.tags) : null,
       patch?.evidence ? JSON.stringify(patch.evidence) : null,
+      patch?.grounding_method ?? null,
+      patch?.valid_until ?? null,
     ],
   );
   return (result.rows[0] as ContextEntry) ?? null;
@@ -625,6 +638,57 @@ export async function listStaleEntries(
     params,
   );
   return result.rows as ContextEntry[];
+}
+
+export interface MemoryFreshnessCandidateRow {
+  id: UUID;
+  context_type: string;
+  valid_until: string | null;
+  reviewed_at: string | null;
+  promoted_at: string | null;
+  updated_at: string | null;
+  created_at: string | null;
+}
+
+export async function listActiveMemoryForFreshness(
+  db: DbPool,
+  tenantId: UUID,
+  limit = 500,
+): Promise<MemoryFreshnessCandidateRow[]> {
+  const result = await db.query(
+    `SELECT id, context_type, valid_until, reviewed_at, promoted_at, updated_at, created_at
+     FROM context_entries
+     WHERE tenant_id = $1
+       AND is_current = TRUE
+       AND memory_status = 'active'
+       AND valid_until IS NULL
+       AND COALESCE(reviewed_at, promoted_at, updated_at, created_at) < now() - interval '30 days'
+     ORDER BY COALESCE(reviewed_at, promoted_at, updated_at, created_at) ASC
+     LIMIT $2`,
+    [tenantId, limit],
+  );
+  return result.rows as MemoryFreshnessCandidateRow[];
+}
+
+export async function markMemoryReviewDue(
+  db: DbPool,
+  tenantId: UUID,
+  entryIds: UUID[],
+): Promise<number> {
+  if (entryIds.length === 0) return 0;
+  const result = await db.query(
+    `UPDATE context_entries
+     SET valid_until = now(),
+         updated_at = now()
+     WHERE tenant_id = $1
+       AND id = ANY($2::uuid[])
+       AND is_current = TRUE
+       AND memory_status = 'active'
+       AND valid_until IS NULL
+     RETURNING id`,
+    [tenantId, entryIds],
+  );
+  return result.rows.length;
 }
 
 export async function searchContextEntries(

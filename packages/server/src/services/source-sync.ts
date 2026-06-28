@@ -734,7 +734,7 @@ export function oauthCallbackErrorMessage(err: unknown, provider: Provider, kind
   const providerLabel = providerSuiteLabel(provider);
   const destination = kind === 'mailbox' ? 'mailbox' : 'calendar';
   if (/OAuth token exchange failed \(400\)/i.test(message)) {
-    return `${providerLabel} rejected the OAuth callback. Confirm the redirect URI in System Connections exactly matches the provider app, then reconnect this ${destination}.`;
+    return `${providerLabel} rejected the OAuth callback. Confirm the redirect URI in Context Connectors exactly matches the provider app, then reconnect this ${destination}.`;
   }
   if (/OAuth token exchange failed/i.test(message)) {
     return `${providerLabel} did not finish the OAuth token exchange. Confirm the active OAuth app client ID and secret are correct, then reconnect this ${destination}.`;
@@ -743,12 +743,12 @@ export function oauthCallbackErrorMessage(err: unknown, provider: Provider, kind
     return `${providerLabel} token refresh failed. Reconnect this ${destination} so CRMy receives a fresh grant.`;
   }
   if (/OAuth app changed or is no longer available/i.test(message)) {
-    return `The OAuth app used for this ${destination} changed or is no longer available. Reconnect after an admin verifies System Connections.`;
+    return `The OAuth app used for this ${destination} changed or is no longer available. Reconnect after an admin verifies Context Connectors.`;
   }
   if (/OAuth credentials are not configured/i.test(message)) {
-    return `${providerLabel} OAuth is not ready yet. Ask an admin to verify System Connections before reconnecting this ${destination}.`;
+    return `${providerLabel} OAuth is not ready yet. Ask an admin to verify Context Connectors before reconnecting this ${destination}.`;
   }
-  return message || `Could not complete ${providerLabel} OAuth. Verify System Connections and try again.`;
+  return message || `Could not complete ${providerLabel} OAuth. Verify Context Connectors and try again.`;
 }
 
 async function exchangeCode(

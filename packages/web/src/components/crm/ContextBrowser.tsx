@@ -757,7 +757,7 @@ export function ContextBrowser({
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      const result = await ingestFileMut.mutateAsync({ filename: file.name, data: base64 }) as any;
+      const result = await ingestFileMut.mutateAsync({ filename: file.name, data: base64, include_text: true }) as any;
       setUploadText(result.full_text ?? '');
       setUploadPreview(result.text_preview ?? '');
       setUploadTruncated(result.truncated ?? false);
@@ -1021,7 +1021,7 @@ export function ContextBrowser({
         const firstResult = results[0] as any;
         const matchedCount = Number(firstResult?.subjects_resolved?.length ?? 0);
         const reason = firstResult?.message
-          ?? firstResult?.raw_context_source?.failure_reason
+          ?? firstResult?.source?.failure_reason
           ?? firstResult?.processing_receipts?.find((receipt: any) => receipt?.failure_reason)?.failure_reason;
         toast({
           title: matchedCount > 0 || useResolvedSubjects ? 'No Signals extracted' : 'No customer record matched',

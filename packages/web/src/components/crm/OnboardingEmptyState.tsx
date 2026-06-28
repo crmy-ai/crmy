@@ -22,7 +22,7 @@ export function SeedSampleDataButton({
 
   const handleSeed = async () => {
     const confirmed = window.confirm(
-      'Add CRMy sample data to this workspace? This inserts demo accounts, contacts, opportunities, raw context, Signals, Memory, and Handoffs. Use it only in local, demo, or evaluation workspaces.',
+      'Add CRMy sample data to this workspace? This inserts demo accounts, contacts, opportunities, Sources, Signals, Memory, and Handoffs. Use it only in local, demo, or evaluation workspaces.',
     );
     if (!confirmed) return;
     try {

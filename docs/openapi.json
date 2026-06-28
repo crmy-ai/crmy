@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CRMy API",
-    "version": "0.9.3",
+    "version": "0.9.4",
     "description": "The operational customer context backend for AI agents. MCP-native, PostgreSQL-backed, open source. Application endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`; provider OAuth callbacks and inbound email webhooks use provider state or tenant-scoped HMAC signatures instead.",
     "license": {
       "name": "Apache-2.0"
@@ -45,7 +45,7 @@
     },
     {
       "name": "Context",
-      "description": "Raw Context, Signals, and confirmed Memory attached to customer records"
+      "description": "Sources, Signals, and confirmed Memory attached to customer records"
     },
     {
       "name": "Source Filters",
@@ -69,7 +69,7 @@
     },
     {
       "name": "Emails",
-      "description": "Customer email ingestion, mailbox connections, Raw Context processing, and governed outbound drafts"
+      "description": "Customer email ingestion, mailbox connections, Source processing, and governed outbound drafts"
     },
     {
       "name": "Calendar",
@@ -81,7 +81,7 @@
     },
     {
       "name": "Sequences",
-      "description": "Governed customer engagement sequences and enrollment state"
+      "description": "Experimental governed customer engagement sequences and enrollment state"
     },
     {
       "name": "Custom Fields",
@@ -89,7 +89,7 @@
     },
     {
       "name": "Workflows",
-      "description": "Event-driven automation"
+      "description": "Experimental event-driven automation"
     },
     {
       "name": "Systems of Record",
@@ -490,6 +490,14 @@
           },
           "is_current": {
             "type": "boolean"
+          },
+          "grounding_method": {
+            "type": "string",
+            "enum": [
+              "lexical",
+              "corroborated",
+              "human_reviewed"
+            ]
           },
           "valid_until": {
             "type": "string"
@@ -1879,6 +1887,12 @@
       "ActionContextActionPacket": {
         "type": "object",
         "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "crmy.action_context.v1"
+            ]
+          },
           "action_type": {
             "type": "string",
             "enum": [
@@ -2035,6 +2049,7 @@
           }
         },
         "required": [
+          "version",
           "objective",
           "status",
           "risk_level",
@@ -2877,7 +2892,7 @@
                 "calendar_processed_count": {
                   "type": "integer"
                 },
-                "raw_context_source_count": {
+                "source_count": {
                   "type": "integer"
                 },
                 "signal_count": {
@@ -5351,9 +5366,9 @@
             "default": "summary",
             "description": "summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries."
           },
-          "include_product_context": {
+          "include_knowledge": {
             "type": "boolean",
-            "description": "Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing."
+            "description": "Include Trusted Facts relevant to this subject. Defaults to true when Trusted Facts are configured; never blocks the briefing."
           }
         }
       },
@@ -5508,9 +5523,9 @@
               "action_type"
             ]
           },
-          "include_product_context": {
+          "include_knowledge": {
             "type": "boolean",
-            "description": "Include governed product knowledge in the assembled briefing. Defaults to true when product knowledge is configured."
+            "description": "Include Trusted Facts in the assembled briefing. Defaults to true when Trusted Facts are configured."
           }
         },
         "required": [
@@ -11390,7 +11405,7 @@
         "tags": [
           "Activities"
         ],
-        "summary": "Extract or attach Raw Context from an activity",
+        "summary": "Extract or attach Source from an activity",
         "security": [
           {
             "BearerAuth": []
@@ -13946,12 +13961,12 @@
         }
       }
     },
-    "/context/raw-sources": {
+    "/context/sources": {
       "get": {
         "tags": [
           "Context"
         ],
-        "summary": "List Raw Context processing records",
+        "summary": "List Source processing records",
         "security": [
           {
             "BearerAuth": []
@@ -14048,12 +14063,12 @@
         }
       }
     },
-    "/context/raw-sources/{id}": {
+    "/context/sources/{id}": {
       "get": {
         "tags": [
           "Context"
         ],
-        "summary": "Get a Raw Context processing record",
+        "summary": "Get a Source processing record",
         "security": [
           {
             "BearerAuth": []
@@ -14095,12 +14110,12 @@
         }
       }
     },
-    "/context/raw-sources/{id}/reprocess": {
+    "/context/sources/{id}/reprocess": {
       "post": {
         "tags": [
           "Context"
         ],
-        "summary": "Reprocess a Raw Context source",
+        "summary": "Reprocess a Source",
         "security": [
           {
             "BearerAuth": []
@@ -14167,7 +14182,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "Ingest Raw Context for a known record",
+        "summary": "Ingest a Source for a known record",
         "security": [
           {
             "BearerAuth": []
@@ -14243,7 +14258,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "Ingest Raw Context and automatically resolve mentioned records",
+        "summary": "Ingest a Source and automatically resolve mentioned records",
         "security": [
           {
             "BearerAuth": []
@@ -14507,7 +14522,7 @@
         "tags": [
           "Knowledge"
         ],
-        "summary": "Retrieve governed product/competitive knowledge for a customer action (optional, non-blocking)",
+        "summary": "Retrieve Trusted Facts for a customer action (optional, non-blocking)",
         "security": [
           {
             "BearerAuth": []
@@ -14638,7 +14653,7 @@
         "tags": [
           "Knowledge"
         ],
-        "summary": "List product knowledge claim envelopes for the admin review queue (governance)",
+        "summary": "List Trusted Facts for the admin review queue (governance)",
         "security": [
           {
             "BearerAuth": []
@@ -14651,6 +14666,15 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "knowledge_type": {
+                    "type": "string",
+                    "enum": [
+                      "company",
+                      "product",
+                      "competitor"
+                    ],
+                    "description": "Filter by high-level Knowledge workspace facet. Legacy claims are inferred from category and competitor scope."
+                  },
                   "status": {
                     "type": "string",
                     "enum": [
@@ -14744,7 +14768,7 @@
         "tags": [
           "Knowledge"
         ],
-        "summary": "Apply a governance review decision to a product knowledge claim (approve/reject/deprecate/mark_stale/reactivate)",
+        "summary": "Apply a governance review decision to a Trusted Fact (approve/reject/deprecate/mark_stale/reactivate)",
         "security": [
           {
             "BearerAuth": []
@@ -14853,7 +14877,7 @@
         "tags": [
           "Knowledge"
         ],
-        "summary": "Detect competing product claims with source-priority resolution (governance)",
+        "summary": "Detect competing Trusted Facts with source-priority resolution (governance)",
         "security": [
           {
             "BearerAuth": []
@@ -14927,6 +14951,533 @@
           },
           "403": {
             "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/source-connections": {
+      "get": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "List MCP Knowledge Source connectors",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "Create an MCP Knowledge Source connector with write-only external credentials",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "endpoint_url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "transport": {
+                    "type": "string",
+                    "enum": [
+                      "streamable_http"
+                    ]
+                  },
+                  "auth_type": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "bearer_token"
+                    ]
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "Write-only credential for the external MCP source. Never returned by list/detail responses."
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 1000
+                  }
+                },
+                "required": [
+                  "name",
+                  "endpoint_url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/source-connections/{id}": {
+      "patch": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "Update an MCP Knowledge Source connector",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "endpoint_url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "transport": {
+                    "type": "string",
+                    "enum": [
+                      "streamable_http"
+                    ]
+                  },
+                  "auth_type": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "bearer_token"
+                    ]
+                  },
+                  "token": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Write-only replacement credential. Omit to keep the existing credential."
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 1000
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "configured",
+                      "syncing",
+                      "error",
+                      "disabled"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "Delete an MCP Knowledge Source connector",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/source-connections/{id}/test": {
+      "post": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "Test an MCP Knowledge Source connector",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/source-connections/{id}/sync": {
+      "post": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "Sync Trusted Facts from an MCP Knowledge Source connector into governance",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -15017,6 +15568,7 @@
           "Context"
         ],
         "summary": "Extract text from a base64 file upload and detect mentioned customer records",
+        "description": "Requires context write access. The full extracted text is omitted by default and returned only when include_text is true.",
         "security": [
           {
             "BearerAuth": []
@@ -15040,6 +15592,10 @@
                   },
                   "source_label": {
                     "type": "string"
+                  },
+                  "include_text": {
+                    "type": "boolean",
+                    "description": "Return full extracted text for follow-on ingestion. Defaults to false."
                   }
                 },
                 "required": [
@@ -15628,7 +16184,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "Trace Raw Context through Signals, Memory, Handoffs, writebacks, and audit",
+        "summary": "Trace Sources through Signals, Memory, Handoffs, writebacks, and audit",
         "security": [
           {
             "BearerAuth": []
@@ -15682,7 +16238,7 @@
               "format": "uuid"
             },
             "required": false,
-            "name": "raw_context_source_id",
+            "name": "source_id",
             "in": "query"
           }
         ],
@@ -16956,11 +17512,11 @@
           {
             "schema": {
               "type": "boolean",
-              "description": "Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing."
+              "description": "Include Trusted Facts relevant to this subject. Defaults to true when Trusted Facts are configured; never blocks the briefing."
             },
             "required": false,
-            "description": "Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing.",
-            "name": "include_product_context",
+            "description": "Include Trusted Facts relevant to this subject. Defaults to true when Trusted Facts are configured; never blocks the briefing.",
+            "name": "include_knowledge",
             "in": "query"
           }
         ],
@@ -18869,7 +19425,7 @@
         "tags": [
           "Calendar"
         ],
-        "summary": "Process a calendar event as Raw Context",
+        "summary": "Process a calendar event as a Source",
         "security": [
           {
             "BearerAuth": []
@@ -19027,7 +19583,7 @@
         "tags": [
           "Calendar"
         ],
-        "summary": "Ignore a calendar event and skip Raw Context processing",
+        "summary": "Ignore a calendar event and skip Source processing",
         "security": [
           {
             "BearerAuth": []
@@ -21428,7 +21984,7 @@
         "tags": [
           "Emails"
         ],
-        "summary": "Process a customer email message as Raw Context",
+        "summary": "Process a customer email message as a Source",
         "security": [
           {
             "BearerAuth": []
@@ -21475,7 +22031,7 @@
         "tags": [
           "Emails"
         ],
-        "summary": "Ignore a customer email and skip Raw Context processing",
+        "summary": "Ignore a customer email and skip Source processing",
         "security": [
           {
             "BearerAuth": []

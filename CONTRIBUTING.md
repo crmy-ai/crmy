@@ -13,7 +13,7 @@ The most useful contributions right now are:
 3. **Messy GTM context corpora**: anonymized calls, meeting notes, transcripts, customer emails, support escalations, product signals, and CRM updates with expected subject matches and expected Signals.
 4. **Record-resolution edge cases**: subsidiaries, aliases, shared domains, duplicate contact first names, same opportunity names under different accounts, stale CRM records, and partial transcript references.
 5. **Agent harness QA** for Claude Code, Claude Desktop, Codex, ChatGPT Developer Mode, Hermes, OpenClaw, and other MCP-capable environments.
-6. **Operational recovery tests** for failed extraction, retryable Raw Context, stuck agent turns, sync drift, writeback failures, and scoped-access denials.
+6. **Operational recovery tests** for failed extraction, retryable Source processing, stuck agent turns, sync drift, writeback failures, and scoped-access denials.
 7. **Eval cases and suites** for the local eval harness (`crmy eval run`): labeled extraction corpora, record-resolution edge cases, retrieval-quality and tool-choice cases, and Action Context decisions — so model and prompt changes are measurable, not anecdotal.
 
 Feature ideas are welcome, but for the 0.9 line we prefer contributions that make the existing engine more reliable, measurable, and boring in production.
@@ -48,7 +48,7 @@ CRMy is a TypeScript monorepo with the following packages:
 
 The engine should keep clear boundaries between source material, inferred claims, confirmed customer context, model-visible working context, governed action, and proof. When adding features or changing behavior, preserve these guardrails:
 
-1. **Keep lifecycle states distinct.** Raw Context is source material before extraction. Signals are inferred claims with evidence and readiness. Memory is confirmed operational customer context. Active Context is temporary model-visible context assembled for an agent turn. Handoffs, writebacks, receipts, and audit events record governed action.
+1. **Keep lifecycle states distinct.** Sources are captured source material before extraction. Signals are inferred claims with evidence and readiness. Memory is confirmed operational customer context. Active Context is temporary model-visible context assembled for an agent turn. Handoffs, writebacks, receipts, and audit events record governed action.
 2. **Validate at every external boundary.** REST payloads, MCP tool input, webhooks, provider responses, CRM/warehouse sync data, email/calendar data, file extraction output, and LLM output enter as runtime data. Parse and validate them at the edge before passing domain-shaped values deeper into the engine.
 3. **Scope every operation.** Reads and writes must remain tenant-scoped and actor-scoped. UI visibility is not enough; REST handlers, MCP tools, services, repositories, background workers, and workflow actions must preserve `tenant_id`, actor role, owner visibility, and tool scopes.
 4. **Keep API and tool contracts stable.** REST, CLI, MCP, and web UI surfaces can share behavior, but each boundary should expose explicit input/output contracts. Do not leak provider quirks, SQL rows, private IDs, or internal retry state into user-facing contracts unless the contract is specifically for operators.
@@ -87,7 +87,7 @@ Key migrations to be aware of when developing:
 | 031–039 | Automation engine (workflows, sequences, HITL, email sequences) |
 | 040–049 | Automation performance, idempotency, recovery, auth lifecycle, and Systems of Record |
 | 050–059 | Signal groups, scoped actors, pgvector/Lineage, durable agent turns, and Customer Email |
-| 060–068 | Email drafts, calendar meetings, source filters, Raw Context recovery, scale indexes, extraction attempts, and replay payloads |
+| 060–068 | Email drafts, calendar meetings, source filters, Source recovery, scale indexes, extraction attempts, and replay payloads |
 
 ### Web UI pages (18)
 
@@ -209,7 +209,7 @@ CRMy is built iteratively via versioned spec files passed to Claude Code (Opus).
 ## Good first contributions
 
 1. **Add or improve an MCP tool description** (`packages/server/src/mcp/tools/`)
-2. **Add a realistic fixture** to the Raw Context or record-resolution corpus
+2. **Add a realistic fixture** to the Source extraction or record-resolution corpus
 3. **Report a `briefing_get` bug** with a specific customer scenario and expected context
 4. **Add a `crmy doctor` check** for something that catches new contributors off guard
 5. **Improve CLI or MCP error messages** for setup, auth, extraction, or scoped-access failures
@@ -224,7 +224,7 @@ Please prioritize integration tests that answer these questions:
 
 - Can CRMy read from the source without storing internal/spam/noise that should be filtered?
 - Does Subject Graph resolution choose the right account and only attach child contacts, opportunities, and use cases when the account scope supports it?
-- Does Raw Context extraction create useful Signals without false-positive Memory promotion?
+- Does Source extraction create useful Signals without false-positive Memory promotion?
 - Does `briefing_get` give an agent enough context to act safely?
 - Does Handoff review include the evidence, proposed action, policy reason, and linked customer record?
 - Does writeback preview block fields that are not explicitly writable?

@@ -1434,10 +1434,10 @@ export default function SequencesPage({ embedded }: { embedded?: boolean } = {})
     <div className={embedded ? 'flex-1 min-h-0 flex flex-col' : 'flex flex-col h-full'}>
       {!embedded && (
         <TopBar
-          title="Sequences"
+          title="Experimental Sequences"
           icon={Zap}
           iconClassName="text-amber-500"
-          description={`${headerDescription('Coordinate multi-step customer engagement', filtered.length, 'sequence')} • ${active.toLocaleString()} active`}
+          description={`${headerDescription('Test governed multi-step customer engagement', filtered.length, 'sequence')} • ${active.toLocaleString()} active`}
         />
       )}
 
@@ -1461,7 +1461,7 @@ export default function SequencesPage({ embedded }: { embedded?: boolean } = {})
             </div>
             <h2 className="text-lg font-display font-semibold text-foreground mb-1">No sequences yet</h2>
             <p className="text-sm text-muted-foreground max-w-sm mb-4">
-              Sequences coordinate multi-step engagement with timed outreach, tasks, approvals, branching, and context-aware follow-up.
+              Experimental sequences help validate governed outbound orchestration with approvals and context-aware follow-up.
             </p>
             <button onClick={() => openSequenceEditor(null)} className={btnPrimary}>
               <span className="flex items-center gap-1.5"><Plus className="w-4 h-4" /> Create your first sequence</span>

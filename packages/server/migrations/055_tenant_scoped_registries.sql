@@ -2,7 +2,7 @@
 --
 -- Earlier registry tables used type_name as a global primary key while most
 -- reads were tenant-scoped. That meant only the first seeded tenant had
--- extractable context types, and Raw Context ingestion in other tenants could
+-- extractable context types, and Source ingestion in other tenants could
 -- not produce Signals.
 
 ALTER TABLE activity_type_registry

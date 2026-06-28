@@ -13,10 +13,10 @@ The goal is not to replace Salesforce, HubSpot, Databricks, Snowflake, or future
 > Two things changed and a downstream agent must not miss them:
 >
 > 1. **Repositioning.** The product is **trustworthy action**, not "memory." Memory is the substrate; the headline is `action_context_get` + grounded promotion + proof/lineage. Anything justified mainly by "smaller prompts / token reduction" is deprioritized.
-> 2. **Sequences and the Automations/Workflow *builder* are deprecated as product surfaces.** They compete with Outreach/Apollo and Zapier and are off-thesis. See [Scope Decisions](#scope-decisions-build-freeze-kill) and [Deprecation Plan](#deprecation-plan-sequences--automations).
->    - **Do NOT remove the internal event bus.** The event bus (`events`, emitters, `workflow_runs` dedupe primitives, context outbox) is **load-bearing infrastructure** for ingestion, source sync, HITL, lineage, and webhooks. Only the **user-facing automation/sequence product surfaces** (the workflow builder UI, sequence engine UI, their MCP tools, docs, demo, and positioning) are being killed.
+> 2. **Sequences and the Automations/Workflow *builder* are experimental, demoted surfaces.** They can support controlled validation of governed automation patterns, but they must not become the product thesis or first-run path. See [Scope Decisions](#scope-decisions-build-freeze-kill) and [Experimental Surface Plan](#experimental-surface-plan-sequences--automations).
+>    - **Do NOT remove the internal event bus.** The event bus (`events`, emitters, `workflow_runs` dedupe primitives, context outbox) is **load-bearing infrastructure** for ingestion, source sync, HITL, lineage, and webhooks. Keep user-facing automation/sequence surfaces admin-only, clearly experimental, and outside default positioning.
 >
-> Sections of this doc that are now **superseded / downgraded** by the refocus: the entire [Automations And Sequences Integration](#automations-and-sequences-integration) section (0.8), the "Sequences" and "Automations" rows in the [feature-altitude table](#10-product-surface-cleanup-and-feature-altitude), and any acceptance/test items that assert Sequences/Automations as supported first-class surfaces. They remain in the document as historical context only.
+> Sections of this doc that are now **superseded / downgraded** by the refocus: any acceptance/test items that assert Sequences/Automations as supported first-class surfaces. They remain available only as experimental admin surfaces.
 
 ## Strategic Refocus: The Governed Action & Provenance Control Plane
 
@@ -41,11 +41,11 @@ The original thesis — "context alone is insufficient; agents need a durable *t
 3. **Lineage + receipts** — durable, exclusion-aware proof of what evidence an agent used and why context was excluded.
 4. **Cross-CRM neutrality** — the one structural advantage CRM-native agents (Salesforce Agentforce, HubSpot Breeze) cannot match.
 
-### What is NOT differentiated — do not invest / kill
+### What is NOT differentiated — do not make primary
 
 - Retrieval & token-compression cleverness (dies to long context + model-native memory). Demote token-budget packing to a silent utility; drop token-reduction messaging.
-- **Sequences** (competes with Outreach/Apollo) — **deprecate**.
-- **Automations / workflow *builder*** as a product surface (competes with Zapier) — **deprecate the surface, keep the event bus**.
+- **Sequences** (competes with Outreach/Apollo when positioned broadly) - **experimental only**.
+- **Automations / workflow *builder*** as a product surface (competes with Zapier when positioned broadly) - **experimental only, keep the event bus**.
 - Webhooks / messaging channels — maintain as plumbing only; no investment; out of positioning.
 - Knowledge-graph reasoning — we never had it (FK joins + a provenance DAG); stop implying it.
 - Generic "agent memory store" framing — keep memory GTM-typed and specific or it commoditizes.
@@ -75,7 +75,7 @@ These are committed decisions, not options. Each lists the **change** an impleme
 
 ### Fix the decay gap (makes a headline claim actually true)
 
-Today, customer Memory only goes stale if the extraction model emitted a `valid_until` (`extraction.ts` prompt) or a human set a TTL — there is **no automatic, type-based freshness window for customer Memory.** Ironically the *optional* product-knowledge layer already has deterministic category windows. **Action:** give customer Memory the same treatment, using `packages/server/src/services/knowledge-freshness.ts` (`freshnessWindowDays`, `computeStaleClaimIds`) as the template, driven by `context_type`. Un-dated Memory must auto-stale by type so `staleness.ts` sweeps and briefing `staleness_warnings` actually fire.
+Today, customer Memory only goes stale if the extraction model emitted a `valid_until` (`extraction.ts` prompt) or a human set a TTL — there is **no automatic, type-based freshness window for customer Memory.** Ironically the optional Trusted Fact layer already has deterministic category windows. **Action:** give customer Memory the same treatment, using `packages/server/src/services/knowledge-freshness.ts` (`freshnessWindowDays`, `computeStaleClaimIds`) as the template, driven by `context_type`. Un-dated Memory must auto-stale by type so `staleness.ts` sweeps and briefing `staleness_warnings` actually fire.
 
 ### The Core Profile — the smallest valuable product
 
@@ -85,13 +85,13 @@ The spine everything hangs off. Ships as the **default install**: connector-free
 context_ingest_auto  ->  grounded promotion  ->  briefing_get  ->  action_context_get  ->  context_lineage_get
 ```
 
-Everything beyond this loop (SoR connectors, email/calendar sources, product knowledge, HITL beyond review queue) is an **opt-in module**, not a prerequisite.
+Everything beyond this loop (SoR connectors, email/calendar sources, Trusted Facts, HITL beyond review queue) is an **opt-in module**, not a prerequisite.
 
 ### Scope Decisions: build, freeze, kill
 
 | Surface | Decision | Rationale |
 |---|---|---|
-| Raw Context → Signals → Memory lifecycle | **Core** | The substrate; differentiated via grounded promotion. |
+| Sources -> Signals -> Memory lifecycle | **Core** | The substrate; differentiated via grounded promotion. |
 | Action Context (`inform`/`warn`/`require_review`) | **Core — lead with it** | Most defensible code; the product. |
 | Lineage + receipts + audit | **Core — the trust brand** | Hard to replicate; survives model-native memory. |
 | Grounded promotion + claim-class tiers (D3) + model gating (D4) + decay windows | **Core — must make true for 1.0** | Closes epistemic-overreach + weak-model + decay risks. |
@@ -99,41 +99,41 @@ Everything beyond this loop (SoR connectors, email/calendar sources, product kno
 | Customer Email / Activity / Calendar | **Keep — framed as ingestion sources only** | Feed the loop; not inbox/calendar apps. |
 | HITL / Handoffs | **Keep** | The human-review half of governance. |
 | Internal event bus, context outbox, `workflow_runs` dedupe primitives | **Keep — load-bearing infra (NOT the builder)** | Ingestion, sync, HITL, lineage, webhooks depend on it. |
-| **Sequences** (`email-sequences`, migrations 037–041) | **KILL — deprecate & remove from product surface** | Competes with Outreach/Apollo; off-thesis. |
-| **Automations / Workflow builder** (`workflows.ts`, migration 011, builder UI) | **KILL the surface — deprecate** | Competes with Zapier; off-thesis. Keep the event bus underneath. |
+| **Sequences** (`email-sequences`, migrations 037-041) | **Experimental - demote from default path** | Useful for controlled governed-orchestration validation; do not position as sales engagement. |
+| **Automations / Workflow builder** (`workflows.ts`, migration 011, builder UI) | **Experimental - admin-only** | Useful for validating event routing; do not position as generic workflow automation. Keep the event bus underneath. |
 | Webhooks / Messaging channels | **Freeze — plumbing only, out of positioning** | Not differentiation. |
 | Token-budget profiles as a *feature* | **Demote to silent utility (D6)** | Dies to long context. |
 | Semantic-search tuning as a headline | **Deprioritize** | Retrieval cleverness is not the moat. |
 | Procedural/reflective learning loop | **Out of 1.0 — substrate only (D5)** | Biggest gap, riskiest scope; v1.1 headline. |
 
-### Deprecation Plan: Sequences & Automations
+### Experimental Surface Plan: Sequences & Automations
 
-**Principle:** remove the *product surfaces* and *positioning*, preserve *existing tenant data* and the *event bus*. No destructive migrations in this cycle.
+**Principle:** preserve the surfaces for controlled validation, but make their altitude unmistakable: admin-only, experimental, absent from first-run positioning, and secondary to the governed-context loop. No destructive migrations in this cycle.
 
-**Sequences — deprecate:**
-1. Remove `sequence_*` MCP tools from all default toolsets; mark them `deprecated` in `tool_guide` and hide from the default catalog. Keep callable only under an explicit `legacy_sequences` toolset for existing users.
-2. Remove Sequences from primary nav and from the demo/quickstart path. Move any remaining UI behind an "Advanced (legacy)" settings area.
-3. Strip Sequences from README, guide, recipes, examples, and positioning. Delete the "Outreach agent" / sequence-centric recipe framing.
-4. Freeze all feature work. Keep `sequence_enrollments`/`sequences` tables and durable execution intact for existing enrollments; add no new capability.
-5. Remove sequence-specific acceptance criteria and test-plan items from the 1.0 gate (keep regression tests only for existing-data safety).
+**Sequences - experimental:**
+1. Keep `sequence_*` MCP tools outside default toolsets unless an operator explicitly enables the experimental/full catalog.
+2. Keep Sequences out of primary nav and the demo/quickstart path. Place UI behind **Settings -> Automation Experiments**.
+3. Strip sales-engagement positioning from README, guide, recipes, and examples.
+4. Freeze broad feature expansion. Keep durable execution and regression tests for existing functionality.
+5. Remove sequence-specific acceptance criteria from the 1.0 core gate unless tied to Action Context proof.
 
-**Automations / Workflow builder — deprecate the surface, keep the bus:**
-1. Remove `workflow_*` builder tools and the Automations builder UI from default toolsets, primary nav, demo, and positioning.
+**Automations / Workflow builder - experimental surface, keep the bus:**
+1. Keep `workflow_*` builder tools and the Automations builder UI out of default toolsets, primary nav, demo, and positioning.
 2. **Keep** the internal event bus (`events`, emitters), context outbox, and `workflow_runs` dedupe/replay primitives — these power ingestion, source sync, HITL routing, lineage, and webhooks and must not be removed.
 3. Re-scope internal event→action needs (e.g. "create review assignment when a Signal is stale") as **fixed, governed internal handlers**, not user-authored workflows. Reuse `staleness.ts` / `knowledge-governance.ts` patterns.
-4. Strip "automation engine," "workflow builder," and "sequences" framing from docs; replace with "governed internal handlers + event bus."
-5. Remove the 0.8 "Automations And Sequences Integration" workstream from the active roadmap (kept below as historical context only).
+4. Strip "automation engine," "workflow builder," and sales-engagement framing from positioning; use "experimental automation" only when the surface is visible.
+5. Keep the 0.8 "Automations And Sequences Integration" section as historical context for the event-bus design only.
 
-**Migration/runbook note for implementers:** announce deprecation in `CHANGELOG`/`RELEASE_NOTES`, gate the legacy surfaces behind an opt-in flag for one minor version, then remove UI/tools. Plan eventual table removal (or extraction to a separate optional plugin package) **after** 1.0, not during it.
+**Migration/runbook note for implementers:** announce the experimental status in `CHANGELOG`/`RELEASE_NOTES`, keep these surfaces out of the default path, and preserve existing data. Do not remove tables or tools during this cycle.
 
 ### Focused Road to 1.0 (phased)
 
-Current release: 0.9.3. Each phase maps to a differentiated mechanism and has a hard acceptance gate.
+Current release: 0.9.4. Each phase maps to a differentiated mechanism and has a hard acceptance gate.
 
 | Phase | Theme | Deliverables (grounded in existing code) | Acceptance gate |
 |---|---|---|---|
 | **0.9.4** | **Trust integrity** (make the headline claims true) | D3 claim-class tiers atop `signal-readiness.ts`; `grounding_method` on every Memory row; **customer-Memory decay windows** via `knowledge-freshness.ts` template; D4 model-certification gate for auto-promote via the eval harness | A weak/uncertified model can never mint Tier-2 Memory; un-dated Memory auto-stales by type; eval suite proves both |
-| **0.9.5** | **Core Profile + portable contract** | Default Core Profile install (connector-free, ~20-tool default toolset); **version & freeze the Action Context packet schema** (D1/D6); reposition docs/demo around `action_context_get`; **execute the Sequences + Automations deprecation** (routes preserved, surfaces removed) | New builder runs the 5-tool loop with zero connectors; Action Context contract is versioned + documented; Sequences/Automations gone from default surface |
+| **0.9.5** | **Core Profile + portable contract** | Default Core Profile install (connector-free, ~20-tool default toolset); **version & freeze the Action Context packet schema** (D1/D6); reposition docs/demo around `action_context_get`; **keep Sequences + Automations experimental and outside default paths** | New builder runs the 5-tool loop with zero connectors; Action Context contract is versioned + documented; Sequences/Automations stay out of default surfaces |
 | **0.9.6** | **Neutrality + proof** (lock the moat) | D7 two-SoR + connector-free parity in eval + demo; universal proof-receipt envelope across retrieval/draft/HITL/writeback/turn; D2 "SoR-defers-on-conflict" invariant | Canonical flow passes identically on Salesforce, HubSpot, and no-connector; one receipt format audits all action types |
 | **1.0-RC** | **Resilience at scale (core loop only)** | Apply the existing [1.0: Resilience At Scale](#10-resilience-at-scale) workstreams **scoped to the ingest→promotion→briefing→action→lineage path**, not the full surface | High-volume soak on the core loop meets latency/correctness budgets |
 | **1.0 GA** | **Honest, focused launch** | Repositioned messaging; certified runtime matrix for the 5-tool loop; D5 outcome-instrumentation substrate (data capture only) | The "what dies / what survives model-native memory" story holds; no overclaimed epistemics in docs |
@@ -141,7 +141,7 @@ Current release: 0.9.3. Each phase maps to a differentiated mechanism and has a 
 ### Explicitly NOT doing before 1.0
 
 - New connector types beyond the two-CRM + warehouse + connector-free set.
-- Any Sequences or Automations/workflow-builder feature work (they are being removed).
+- Broad Sequences or Automations/workflow-builder feature expansion beyond controlled experiments.
 - The procedural/reflective learning loop (substrate only — D5).
 - Token-reduction / "smaller prompt" messaging or features (D6).
 - Knowledge-graph reasoning.
@@ -169,7 +169,7 @@ Not storage, not the contract (copyable). It is: (a) the **grounded-promotion + 
 - Briefing/packing (demote per D6): `packages/server/src/services/briefing.ts`.
 - Toolsets / default catalog (Core Profile, D8): MCP tool registration under `packages/server/src/mcp/tools/` and toolset selection.
 - Eval harness (D4/D7 gates): see [Eval Harness Plan](eval-harness-0.9.3-plan.md).
-- Surfaces to deprecate: `packages/server/src/mcp/tools/email-sequences.ts`, `packages/server/src/mcp/tools/workflows.ts`; **do not touch** the event emitter / `events` / context-outbox infra.
+- Experimental surfaces: `packages/server/src/mcp/tools/email-sequences.ts`, `packages/server/src/mcp/tools/workflows.ts`; **do not touch** the event emitter / `events` / context-outbox infra.
 
 ## Strategic Direction
 
@@ -183,7 +183,7 @@ Chosen defaults for the 0.8-1.0 line:
 
 - **0.8 supports CRM and warehouse systems of record.** Salesforce, HubSpot, Databricks SQL Warehouse / Delta-backed tables, and Snowflake are the first targets.
 - **0.9 hardens the source-to-action loop.** The priority is not more surface area. The priority is proving that messy customer context reliably becomes Signals, confirmed Memory, governed human decisions, and auditable action.
-- **1.0 is resilience at scale.** The priority is making CRMy dependable on serverless Postgres with high-volume Raw Context, Signals, Memory, source sync, agent work, MCP traffic, and audit history.
+- **1.0 is resilience at scale.** The priority is making CRMy dependable on serverless Postgres with high-volume Sources, Signals, Memory, source sync, agent work, MCP traffic, and audit history.
 - **Warehouses can be authoritative.** CRMy should not assume the CRM is always the primary system of record.
 - **Warehouse writeback is governed.** Agents cannot run arbitrary SQL writes. Writes must use configured mappings and approved write modes.
 - **Automations and Sequences reuse the existing event bus.** Connector and warehouse sync should emit normal CRMy events so existing triggers, HITL, audit, and context extraction keep working together.
@@ -357,7 +357,7 @@ Add operational visibility for:
 
 ## Automations And Sequences Integration
 
-> **⚠ SUPERSEDED (0.9.3 refocus).** Sequences and the user-facing Automations/Workflow *builder* are **deprecated** — see [Strategic Refocus → Deprecation Plan](#deprecation-plan-sequences--automations). The **event bus and `workflow_runs` dedupe primitives described below remain load-bearing infrastructure** for ingestion, source sync, HITL, lineage, and webhooks and must be preserved. Read the rest of this section as historical context for the event-bus design only; do **not** invest in the sequence engine or the user-authored workflow builder as product surfaces.
+> **Superseded by the 0.9.4 refocus.** Sequences and the user-facing Automations/Workflow builder are **experimental** and must stay outside the default path. The **event bus and `workflow_runs` dedupe primitives described below remain load-bearing infrastructure** for ingestion, source sync, HITL, lineage, and webhooks and must be preserved. Read the rest of this section as historical context for the event-bus design only; do not invest in broad sequence or user-authored workflow expansion.
 
 Goal: external updates feel native to CRMy.
 
@@ -450,7 +450,7 @@ The 0.9 release should focus on reliability, proof, and agent readiness rather t
 
 CRMy already has the right spine:
 
-- Raw Context
+- Source
 - Signals
 - Memory
 - Handoffs
@@ -464,20 +464,20 @@ The 0.9 work is to make that spine dependable enough for real users and external
 
 ### Current 0.8.x Hardening Checkpoint
 
-The 0.8.x hardening line closes the riskiest early gaps on the way to 0.9: Raw Context reliability, customer-record resolution, Action Context, surface cleanup, durable agent work, MCP/CLI setup, and scoped safety. The current codebase is close to a 0.9-ready self-hosted/local release; the remaining work is mostly launch proof, live-provider certification, and hosted-production hardening.
+The 0.8.x hardening line closes the riskiest early gaps on the way to 0.9: Source reliability, customer-record resolution, Action Context, surface cleanup, durable agent work, MCP/CLI setup, and scoped safety. The current codebase is close to a 0.9-ready self-hosted/local release; the remaining work is mostly launch proof, live-provider certification, and hosted-production hardening.
 
 Completed in the 0.8.x hardening line:
 
-- **Raw Context reliability foundation:** app, REST, MCP, CLI, file/reprocess, Email, and Activity paths now share durable Raw Context receipt semantics, retry metadata, stale-processing repair, replayable payload storage, and data-quality recovery actions.
+- **Source reliability foundation:** app, REST, MCP, CLI, file/reprocess, Email, and Activity paths now share durable Source receipt semantics, retry metadata, stale-processing repair, replayable payload storage, and data-quality recovery actions.
 - **Golden extraction coverage:** the durability suite includes a GTM extraction corpus, custom registry corpus, no-context replay, duplicate-source idempotency, proposed-record handoff dedupe, malformed JSON recovery, typed Memory readiness, and conservative auto-promotion checks.
 - **Duplicate corroboration protection:** repeated ingestion of the same source no longer creates extra Signals or artificial independent evidence for promotion.
-- **Subject Graph resolver:** `customer_record_resolve` is the primary account-first resolver for agents and CLI/REST/MCP. Raw Context extraction, reprocess, file ingestion, email association, calendar/activity association, and agent guidance now share the same resolver semantics.
+- **Subject Graph resolver:** `customer_record_resolve` is the primary account-first resolver for agents and CLI/REST/MCP. Source extraction, reprocess, file ingestion, email association, calendar/activity association, and agent guidance now share the same resolver semantics.
 - **Ambiguity safety:** same-name contacts, opportunities, and use cases are not over-linked without account scope; ambiguous child records become receipts/review states instead of guessed links.
 - **Customer Email and Activity association:** deterministic anchors such as known contact email, reply chain, attendee email, and account domain are still used, then Subject Graph enriches account-scoped contact/opportunity/use-case links when source content supports them.
 - **MCP/CLI setup path:** the agent smoke path exercises `customer_record_resolve -> briefing_get -> context_signal_group_list`; examples for Hermes, Claude Desktop, Claude Code, Codex, ChatGPT Developer Mode, and OpenClaw are aligned to the current tool model.
-- **Scoped safety checks:** hardening tests cover Raw Context no-subject receipt visibility, MCP resource subject access, explicit tool scope mappings, and Workspace Agent write-object policy defaults.
+- **Scoped safety checks:** hardening tests cover Source no-subject receipt visibility, MCP resource subject access, explicit tool scope mappings, and Workspace Agent write-object policy defaults.
 - **Source and navigation cleanup:** primary navigation is focused on the core loop; Customer Email and Customer Activity are framed as Context Sources; Automations/Sequences are moved into admin settings surfaces while compatible routes remain available.
-- **Docs alignment:** README, guide, MCP tool reference, examples, recipes, Raw Context reliability plan, record-resolution plan, and contributor “what belongs where” guidance now describe the same Observe -> Signals -> Memory -> Briefing/Active Context -> Handoff/Writeback -> Proof model.
+- **Docs alignment:** README, guide, MCP tool reference, examples, recipes, Source reliability plan, record-resolution plan, and contributor “what belongs where” guidance now describe the same Observe -> Signals -> Memory -> Briefing/Active Context -> Handoff/Writeback -> Proof model.
 - **Action Context v1:** `POST /api/v1/action-context` and MCP `action_context_get` assemble action-aware context, readiness, policy/source-authority checks, and compact retrieval proof without mutating CRM records or executing writebacks. Email drafts, record create/edit previews, record updates, assignment creation, workflow-triggered email/writeback actions, sequence email and non-email actions, durable agent turns, and systems-of-record writeback previews/requests now carry verified Action Context receipts where they can affect customer work.
 - **Signal Readiness v1:** Signal group responses include deterministic readiness and resolution metadata. The web workflow can repair missing typed Signal details inline through `context_signal_group_complete_details`.
 - **Actor-scoped aggregate safety:** search and stats surfaces now respect member/manager/admin visibility so external agents cannot use aggregate tools as a tenant-wide data leak.
@@ -491,7 +491,7 @@ Remaining before calling 0.9 launch-ready:
 - Keep expanding real-world extraction/resolution fixtures as users contribute messy transcripts, customer emails, calendar artifacts, and source-system edge cases.
 - Run broader synthetic large-tenant soak tests. Current gates verify correctness, drift, security boundaries, and durability; 1.0 still owns high-volume latency budgets on serverless Postgres.
 - Harden browser session handling before hosted enterprise GA. The current bearer-token flow is fine for local/self-hosted 0.9, but hosted browser sessions should move toward short-lived/session-managed auth with revocation and CSRF-safe mutation behavior.
-- Certify the hosted SaaS OAuth model for System Connections against production Google/Microsoft app registrations. The application now supports CRMy-managed Google/Microsoft OAuth apps by default, tenant-owned OAuth app overrides for enterprise tenants, and environment-managed credentials for local/self-hosted installs; 1.0 still needs live-provider verification, consent-screen review, and hosted operational runbooks.
+- Certify the hosted SaaS OAuth model for Context Connectors against production Google/Microsoft app registrations. The application now supports CRMy-managed Google/Microsoft OAuth apps by default, tenant-owned OAuth app overrides for enterprise tenants, and environment-managed credentials for local/self-hosted installs; 1.0 still needs live-provider verification, consent-screen review, and hosted operational runbooks.
 
 ### 0.8.6 Release Checkpoint
 
@@ -502,8 +502,8 @@ Completed in this checkpoint:
 - **MCP/API/CLI parity:** the CLI can list, describe, and call the actor-scoped MCP tool surface through REST, reducing drift between external agents, API clients, and terminal workflows.
 - **Agent harness validation:** recipes and examples now point users toward `agent-smoke` and `tools describe` before debugging Claude, Codex, ChatGPT Developer Mode, Hermes, or OpenClaw setup.
 - **Recipe cleanup:** runnable recipe commands prefer friendly record references such as `account:Northstar Labs` instead of requiring users to know UUIDs.
-- **Raw Context guidance:** recipes now prefer `context_ingest_auto` for messy transcripts, emails, notes, research, and debriefs, with direct `context_add` reserved for advanced reviewed writes.
-- **OpenClaw support:** the OpenClaw plugin exposes Raw Context ingestion and aligns its skill guidance with the current account, Signal, Memory, and Handoff model.
+- **Source guidance:** recipes now prefer `context_ingest_auto` for messy transcripts, emails, notes, research, and debriefs, with direct `context_add` reserved for advanced reviewed writes.
+- **OpenClaw support:** the OpenClaw plugin exposes Source ingestion and aligns its skill guidance with the current account, Signal, Memory, and Handoff model.
 
 ### 0.8.7 Release Checkpoint
 
@@ -520,9 +520,9 @@ Completed in this checkpoint:
 
 ### 1. Extraction Reliability And Typed Memory Readiness
 
-Status: **Landed for v0.9 self-hosted readiness; expanding through live corpus.** Raw Context receipts, durable replay, golden fixtures, custom registry fixtures, event-time-aware duplicate protection, typed readiness, permission-safe retry, and conservative auto-promotion checks are landed. Broader live-source corpus coverage and calibration continue as real users contribute messy inputs.
+Status: **Landed for v0.9 self-hosted readiness; expanding through live corpus.** Source receipts, durable replay, golden fixtures, custom registry fixtures, event-time-aware duplicate protection, typed readiness, permission-safe retry, and conservative auto-promotion checks are landed. Broader live-source corpus coverage and calibration continue as real users contribute messy inputs.
 
-Raw Context ingestion is the heart of CRMy. In 0.9 it should be treated like critical infrastructure.
+Source ingestion is the heart of CRMy. In 0.9 it should be treated like critical infrastructure.
 
 Key changes:
 
@@ -563,7 +563,7 @@ Bring-your-own source paths:
 
 Key changes:
 
-- Make every source path route through the same Raw Context ingestion and receipt model.
+- Make every source path route through the same Source ingestion and receipt model.
 - Keep internal, spam, automated, excluded-domain, and low-value messages out of storage and extraction by default.
 - Add source maturity labels in docs and admin setup copy: `First-class`, `Via REST/MCP/CLI`, `Planned connector`.
 - Preserve optionality: mailbox and calendar connections are useful, but emails, transcripts, notes, and activity context can still enter through Add Context or MCP.
@@ -591,7 +591,7 @@ Action Context should resolve into one of three operating modes:
 
 | Mode | Behavior | Examples |
 |---|---|---|
-| `inform` | Provide context and proof hints without slowing the agent down. | Brief an account, summarize current risks, draft internal notes, prepare a follow-up, search Memory, add Raw Context. |
+| `inform` | Provide context and proof hints without slowing the agent down. | Brief an account, summarize current risks, draft internal notes, prepare a follow-up, search Memory, add Source. |
 | `warn` | Allow the action, but surface stale, inferred, conflicting, or low-confidence context clearly. | Draft a customer email using unconfirmed Signals, recommend next steps with stale Memory, prepare a record update preview. |
 | `require_review` | Require human review before execution. | Send customer email automatically, change forecast/stage/amount/owner, write back to CRM/warehouse, make external commitments, use unconfirmed Signals as fact, act on out-of-scope records. |
 
@@ -623,13 +623,13 @@ Acceptance target: a user can see why a Signal is not Memory yet and what action
 
 ### 5. Proof-Grade Lineage And Audit
 
-Status: **Landed for first-class workflows; 1.0 owns scale polish.** Lineage includes Raw Context, Signals, Memory, Active Context retrievals, Handoffs, writebacks, workflow/sequence actions, and audit events. Remaining work is scale, retention, export, and precomputed edge performance.
+Status: **Landed for first-class workflows; 1.0 owns scale polish.** Lineage includes Sources, Signals, Memory, Active Context retrievals, Handoffs, writebacks, workflow/sequence actions, and audit events. Remaining work is scale, retention, export, and precomputed edge performance.
 
 Lineage should become the proof trail for the source-to-action lifecycle.
 
 Key changes:
 
-- Source -> activity/email/meeting -> Signal -> Signal group -> Memory -> briefing retrieval -> agent action -> Handoff -> writeback -> audit.
+- Sources -> activity/email/meeting -> Signal -> Signal group -> Memory -> briefing retrieval -> agent action -> Handoff -> writeback -> audit.
 - Persist retrieval events when Memory or Signals are loaded into Active Context for a high-impact agent action.
 - Attach writeback receipts to the Memory, Handoff, system-of-record mapping, and audit event they came from.
 - Show partial lineage honestly when older records or external actions do not have complete links.
@@ -656,7 +656,7 @@ Acceptance target: a user can delegate work, leave, return, inspect what happene
 
 ### 7. Scoped Access Parity Across Every Surface
 
-Status: **Landed for core 0.9 surfaces; continuously expanding.** Core REST/MCP/worker parity tests exist across Raw Context, MCP resources, action tools, aggregate safety, workers, and agent paths. Continue adding coverage as new tools and UI flows land.
+Status: **Landed for core 0.9 surfaces; continuously expanding.** Core REST/MCP/worker parity tests exist across Source, MCP resources, action tools, aggregate safety, workers, and agent paths. Continue adding coverage as new tools and UI flows land.
 
 Scoped actors are a product differentiator and a security boundary.
 
@@ -727,7 +727,7 @@ The first-time user should understand:
 
 Guiding rules:
 
-- Keep the source-to-action loop visually central: Raw Context -> Signals -> Memory -> Briefing / Active Context -> Handoff / Writeback -> Audit.
+- Keep the source-to-action loop visually central: Sources -> Signals -> Memory -> Briefing / Active Context -> Handoff / Writeback -> Audit.
 - Hide or demote features that compete with that loop until they are needed.
 - Move admin/operator features out of daily user paths.
 - Rename features by outcome, not implementation.
@@ -737,7 +737,7 @@ Recommended feature altitude:
 
 | Feature | 0.9 visibility | Rationale |
 |---|---|---|
-| Raw Context | Core | Intake layer for messy customer material. |
+| Sources | Core | Intake layer for messy customer material. |
 | Signals | Core | Reasoning layer for inferred claims. |
 | Memory | Core | Confirmed operational context agents can rely on. |
 | Handoffs | Core | Human review and safety layer. |
@@ -755,14 +755,14 @@ Recommended feature altitude:
 | Manual writeback test bench | Advanced | Admin/operator testing only. |
 | Direct manual Memory creation | Advanced | Normal users should add context, review Signals, and confirm Memory. |
 
-> **⚠ SUPERSEDED (0.9.3 refocus).** The **Automations** and **Sequences** rows above are **deprecated**, not "Advanced/Experimental." They are being removed from the product surface (competes with Zapier / Outreach; off-thesis). The internal event bus stays. See [Strategic Refocus → Scope Decisions](#scope-decisions-build-freeze-kill) and [Deprecation Plan](#deprecation-plan-sequences--automations).
+> **Updated 0.9.4 direction.** The **Automations** and **Sequences** rows above are experimental, not default product surfaces. The internal event bus stays. See [Strategic Refocus -> Scope Decisions](#scope-decisions-build-freeze-kill) and [Experimental Surface Plan](#experimental-surface-plan-sequences--automations).
 
 Key cleanup changes:
 
 - Keep primary member/manager navigation focused on Overview, customer records, Context, Handoffs, and Workspace Agent.
 - Move Customer Email and Customer Activity into a Context `Sources` surface or clearly frame them as source feeds.
-- Move Automations, Sequences, Webhooks, and manual writeback testing into Settings -> Automations or other admin-only settings surfaces.
-- Keep Context tabs centered on Raw Context, Signals, Memory, and Lineage. Keep Graph secondary.
+- Move Automations, Sequences, Webhooks, and manual writeback testing into Settings -> Automation Experiments or other admin-only settings surfaces.
+- Keep Context tabs centered on Sources, Signals, Memory, and Lineage. Keep Graph secondary.
 - Make record drawers the main customer action hub: Ask Agent, Update with Agent, Generate Brief, Add Context, Draft Email, Log Activity, Review Signals, and View Lineage.
 - Reorganize Settings around Workspace, Agent, Sources, Systems, Governance, Operations, and Advanced.
 - Keep routes backward compatible even when nav placement changes.
@@ -778,8 +778,8 @@ Language cleanup:
 
 Implementation order:
 
-1. **Navigation cleanup:** move Email and Activities out of primary nav; move Automations and Sequences to Settings -> Automations; keep routes compatible.
-2. **Context simplification:** add a Sources surface, demote Graph, and keep Raw Context / Signals / Memory / Lineage as the main Context path.
+1. **Navigation cleanup:** move Email and Activities out of primary nav; move Automations and Sequences to Settings -> Automation Experiments; keep routes compatible.
+2. **Context simplification:** add a Sources surface, demote Graph, and keep Sources / Signals / Memory / Lineage as the main Context path.
 3. **Settings consolidation:** group admin setup by outcome and hide admin-only areas from non-admins.
 4. **Workflow polish:** make Overview and record drawers surface source issues, Signals, Handoffs, stale Memory, and missing context as work to do.
 5. **Docs alignment:** organize docs around Observe -> Signals -> Memory -> Briefing -> Handoff / Writeback -> Proof, with advanced features moved out of the first-run path.
@@ -795,11 +795,11 @@ Acceptance target: a new user sees one product story, not a collection of adjace
 - Do not require mailbox/calendar connections for emails, transcripts, or notes to feed Memory.
 - Do not let agents write directly to systems of record without policy, preview, idempotency, approval where required, and audit.
 
-## 0.9.3: Eval Harness, Product Knowledge, And Agent Quality Gates
+## 0.9.3: Eval Harness, Trusted Facts, And Agent Quality Gates
 
 Status: **Foundation landed for 0.9.3; expanding toward 1.0 proof.** See
 [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md) and
-[Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
+[Governed Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
 
 0.9.3 makes CRMy's customer-context promise measurable in layers. The default
 `contract` profile proves parser, promotion, readiness, and record-resolution
@@ -817,13 +817,13 @@ customer-derived cases, embedding/semantic retrieval comparisons, live connector
 certification, model-backed cross-runtime agent trajectories, and public
 benchmark artifacts.
 
-0.9.3 should also add optional governed product, solution, pricing,
-implementation, security, compliance, roadmap, and competitive knowledge
-retrieval. Customer Memory remains the core product. Product knowledge should
-be a sibling retrieval layer that helps agents connect customer context to safe
-customer-facing product claims without turning CRMy into a CMS or making
-product knowledge required for briefings, Action Context, writeback, or local
-agent workflows.
+0.9.3 should also add optional governed company, product, solution, pricing,
+implementation, security, compliance, roadmap, and competitive Trusted Fact
+retrieval. Customer Memory remains the core product. Knowledge should be a
+sibling retrieval layer that helps agents connect customer context to safe
+customer-facing Trusted Facts without turning CRMy into a CMS or making
+knowledge required for briefings, Action Context, writeback, or local agent
+workflows.
 
 Implemented 0.9.3 foundation:
 
@@ -831,7 +831,7 @@ Implemented 0.9.3 foundation:
   artifact schemas.
 - Local-first CLI profiles: `contract`, `live_model`, `seeded_context`, and
   `agent_runtime`.
-- Raw Context, custom registry, and record-resolution contract suites.
+- Source, custom registry, and record-resolution contract suites.
 - Live extraction quality suite that does not consume `golden_model_output` as
   model input, uses the production extraction/write/group/receipt path, and
   skips cleanly unless live config is required.
@@ -853,38 +853,38 @@ Recommended next direction:
   REST, CLI, Workspace Agent, briefing, Action Context, and UI surfaces.
 - Keep external systems authoritative for product docs, battlecards,
   changelogs, pricing, roadmap, security, and compliance material.
-- Store product-knowledge claim envelopes, freshness, approval, visibility,
+- Store Trusted Facts, freshness, approval, visibility,
   citations, and retrieval receipts separately from customer Memory.
 - Prevent stale, unapproved, internal-only, deprecated, unsupported, or
-  conflicting product claims from reaching customer-facing draft packets.
+  conflicting Trusted Facts from reaching customer-facing draft packets.
 
 Acceptance target: a contributor or customer can run `crmy eval run --profile
 contract`, `crmy eval run --profile seeded_context`, and `crmy eval run
 --profile agent_runtime` and receive reports showing whether CRMy retrieved the right
 Memory and Signals, chose safe tool paths, made correct Action Context
 decisions, preserved source attribution, avoided unsupported customer-facing
-claims, and left enough proof to audit the workflow. When governed product
-knowledge is configured, agents can retrieve product and competitive context in
+claims, and left enough proof to audit the workflow. When Trusted Facts are
+configured, agents can retrieve company, product, and competitive context in
 a cited, policy-aware, freshness-aware, and auditable way; when it is not
 configured, the core 0.9 customer Memory and Action Context product behaves as
 it does today.
 
-## 0.9.3: Optional Governed Product Knowledge Retrieval
+## 0.9.3: Optional Governed Knowledge Retrieval
 
-Status: **Phases 1-7 of the governed claim path landed in 0.9.3; source-adapter automation remains roadmap.** See
-[Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
+Status: **Phases 1-7 of the Trusted Fact path landed in 0.9.3; source-adapter automation remains roadmap.** See
+[Governed Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
 
 After 0.9 hardens customer Memory, Action Context, source reliability, proof,
-and surface consistency, 0.9.3 adds optional governed retrieval for product,
-service, solution, and competitive knowledge. The implementation includes claim
+and surface consistency, 0.9.3 adds optional governed retrieval for company,
+product, service, solution, and competitive Trusted Facts. The implementation includes fact
 envelopes, policy filtering, retrieval receipts, MCP, REST, CLI, briefing/Action
 Context enrichment, email draft grounding, freshness, conflicts, and admin
-governance. It returns `not_configured` until governed claims exist.
+governance. It returns `not_configured` until Trusted Facts exist.
 
 This should not become a required dependency for core CRMy behavior. Customer
 briefings, Action Context, Workspace Agent flows, email drafts, and writeback
-safety must continue to work when no product knowledge sources are configured.
-Actors may still compile product knowledge at the edge. CRMy should provide
+safety must continue to work when no Knowledge Sources are configured.
+Actors may still compile knowledge at the edge. CRMy should provide
 additional value when actors choose to retrieve this knowledge through CRMy:
 freshness checks, approval filtering, external-use visibility, evidence,
 citations, warnings, and retrieval proof.
@@ -892,27 +892,27 @@ citations, warnings, and retrieval proof.
 Recommended direction:
 
 - Add source-adapter automation so product docs, battlecards, changelogs,
-  security/compliance material, and support/KB systems can produce governed
-  claim envelopes without manual upsert.
-- Add embedding-backed retrieval and richer product-knowledge eval suites where
+  security/compliance material, and support/KB systems can produce Trusted
+  Facts without manual upsert.
+- Add embedding-backed retrieval and richer knowledge eval suites where
   they improve precision beyond the current FTS/ranking foundation.
 - Keep external systems authoritative for product docs, battlecards, changelogs,
   pricing, roadmap, security, and compliance material.
-- Store source metadata, source-derived claim envelopes, freshness, approval,
+- Store source metadata, source-derived facts, freshness, approval,
   visibility, citations, and retrieval receipts in CRMy.
-- Add product context to briefings and Action Context only when explicitly
+- Add Trusted Facts to briefings and Action Context only when explicitly
   requested or configured.
-- Treat edge-provided product knowledge as allowed but not CRMy-verified unless
+- Treat edge-provided knowledge as allowed but not CRMy-verified unless
   it passes through the governed retrieval path.
 
 Non-goals for this post-0.9 work:
 
-- Do not require users to maintain product knowledge manually in CRMy.
+- Do not require users to maintain knowledge manually in CRMy.
 - Do not turn CRMy into a generic knowledge base, CMS, battlecard platform,
   roadmap system, or CPQ source of truth.
-- Do not merge global product truth into customer Memory without a separate
+- Do not merge Trusted Facts into customer Memory without a separate
   namespace.
-- Do not let stale, unapproved, internal-only, deprecated, or conflicting claims
+- Do not let stale, unapproved, internal-only, deprecated, or conflicting facts
   reach customer-facing draft packets.
 - Do not require pgvector, embeddings, mailbox/calendar, or local MCP setup for
   the core product to function.
@@ -936,10 +936,10 @@ This work reinforces the core positioning:
 Source ingestion -> Signal review -> Memory -> Action Context -> HITL -> Governed writeback -> Proof
 ```
 
-The 0.9.3 eval and governed product-knowledge workstreams are complementary:
-evals prove whether the control-plane contracts work, while product knowledge
-extends the same governance model from customer truth to customer-facing product
-claims. The remaining items below should land across 0.9.x and 1.0 based on
+The 0.9.3 eval and Trusted Fact workstreams are complementary:
+evals prove whether the control-plane contracts work, while Trusted Facts
+extend the same governance model from customer Memory to customer-facing
+facts. The remaining items below should land across 0.9.x and 1.0 based on
 risk, runtime dependencies, and production scale requirements.
 
 ### 1. Agent Runtime Certification Matrix
@@ -1027,7 +1027,7 @@ Every meaningful agent action should be able to answer:
 0.9.3 complement:
 
 - Include proof-completeness scoring in eval results.
-- Preserve product-knowledge retrieval receipts separately from customer Memory
+- Preserve Trusted Fact retrieval receipts separately from customer Memory
   receipts.
 
 1.0 target:
@@ -1144,7 +1144,7 @@ Expose a durable event stream for agent runtimes, integrations, and operators.
 
 Event families:
 
-- Raw Context received, processed, failed, or reprocessed;
+- Source received, processed, failed, or reprocessed;
 - Signal created, grouped, ready, confirmed, rejected, or blocked;
 - Memory confirmed, stale, superseded, redacted, or revoked;
 - Action Context retrieved;
@@ -1172,7 +1172,7 @@ Policy inputs should include:
 - source authority;
 - evidence strength;
 - customer-facing risk;
-- product-claim approval;
+- Trusted Fact approval;
 - tenant-specific rules.
 
 Policy outputs should remain simple:
@@ -1186,7 +1186,7 @@ Policy outputs should remain simple:
 
 0.9.3 complement:
 
-- Add eval cases for false allow, false review, field authority, product-claim
+- Add eval cases for false allow, false review, field authority, Trusted Fact
   approval, and customer-facing unsupported claims.
 
 1.0 target:
@@ -1216,19 +1216,19 @@ Required Handoff packet areas:
 - A human can approve, reject, clarify, reassign, or take over with the same
   evidence packet regardless of where the request originated.
 
-### 11. Governed Product Knowledge Integration
+### 11. Governed Knowledge Integration
 
-Use the 0.9.3 governed product-knowledge layer to extend the control plane from
-customer truth to customer-facing product claims.
+Use the 0.9.3 governed knowledge layer to extend the control plane from
+customer Memory to customer-facing Trusted Facts.
 
 Control-plane requirements:
 
-- product claims stay separate from customer Memory;
+- Trusted Facts stay separate from customer Memory;
 - retrieval returns citations, freshness, approval, visibility, and warnings;
 - customer-facing drafts cannot use stale, unapproved, internal-only, deprecated,
-  or unsupported product claims;
-- Action Context can include product-claim proof when an action depends on it;
-- Lineage can show which product-knowledge receipts influenced a draft or
+  or unsupported Trusted Facts;
+- Action Context can include Trusted Fact proof when an action depends on it;
+- Lineage can show which Trusted Fact receipts influenced a draft or
   action.
 
 0.9.3 target:
@@ -1238,7 +1238,7 @@ Control-plane requirements:
 
 1.0 target:
 
-- Product-knowledge retrieval participates in policy, proof, evals, and
+- Knowledge retrieval participates in policy, proof, evals, and
   customer-facing action governance without becoming required infrastructure.
 
 ### 12. Eval And Benchmark Suite For Control-Plane Claims
@@ -1257,7 +1257,7 @@ Benchmark areas:
 - source attribution;
 - proof completeness;
 - runtime portability;
-- product-knowledge claim safety.
+- Trusted Fact safety.
 
 0.9.3 target:
 
@@ -1271,7 +1271,7 @@ Benchmark areas:
 
 ## 1.0: Resilience At Scale
 
-Goal: make CRMy reliable as the default context and action engine when a tenant has hundreds of thousands of Raw Context sources and Signals, tens of thousands of Memory entries, active mailbox/calendar/system-of-record sync, multiple Workspace Agent users, and external MCP clients.
+Goal: make CRMy reliable as the default context and action engine when a tenant has hundreds of thousands of Sources and Signals, tens of thousands of Memory entries, active mailbox/calendar/system-of-record sync, multiple Workspace Agent users, and external MCP clients.
 
 Assumed production shape:
 
@@ -1287,7 +1287,7 @@ Assumed production shape:
 - **Background work starves or stalls.** A single in-process worker loop and global advisory lock can let one slow task block extraction, embeddings, source sync, outbox retries, and agent-turn recovery. The 1.0 target is documented in the [Multi-Instance Runtime Plan](multi-instance-runtime-plan.md).
 - **Lists and dashboards get expensive.** Large pages that request counts, broad totals, or client-filtered batches become slow and costly as tenants reach hundreds of thousands of rows.
 - **Search becomes uneven.** Global search, Context Browser, Signals, Memory, Graph, and Lineage need consistent server-side filtering, stable cursors, and search indexes instead of loading recent records and filtering locally.
-- **Raw Context processing becomes request-bound.** LLM extraction, JSON repair, subject resolution, and signal grouping must survive timeouts, cold starts, provider failures, and retries without duplicate Signals or stuck sources.
+- **Source processing becomes request-bound.** LLM extraction, JSON repair, subject resolution, and signal grouping must survive timeouts, cold starts, provider failures, and retries without duplicate Signals or stuck sources.
 - **Source sync becomes too chunky.** Mailbox, calendar, CRM, and warehouse sync need page-level checkpoints and backoff. A provider page failure should not replay or lose an entire sync run.
 - **Agent and MCP sessions become fragile without the hosted runtime envelope.** Live MCP transports and long SSE streams are still process-local. The durable MCP session catalog now records identity, scope, ownership, TTL, and expiry, but hosted deployments still need sticky routing, clear reinitialization behavior, and resumable persisted events around those live transports.
 - **Lineage and audit become heavy.** Source-to-action proof trails and audit logs grow quickly and need indexed edges, retention/export, and precomputed summaries.
@@ -1332,7 +1332,7 @@ Key changes:
 - Run app/API instances, worker instances, and migration jobs as separate production roles. Local development can keep the current in-app worker path.
 - Use the [Multi-Instance Runtime Plan](multi-instance-runtime-plan.md) as the 1.0 implementation contract for processor names, queue contracts, worker behavior, deployment modes, observability, and crash-recovery tests.
 
-Acceptance target: killing a worker mid-job cannot permanently strand Raw Context, embeddings, outbox events, source sync, or agent work.
+Acceptance target: killing a worker mid-job cannot permanently strand Source, embeddings, outbox events, source sync, or agent work.
 
 ### 3. Query, List, And Search Scale
 
@@ -1342,21 +1342,21 @@ Key changes:
 
 - Replace default total-count requirements with `limit + 1` paging, approximate counts, cached rollups, or async totals where exact counts are not user-critical.
 - Use stable compound cursors such as `(updated_at, id)` or `(created_at, id)` instead of timestamp-only cursors.
-- Add server-side filters for every large collection before records reach the UI: Raw Context, Signals, Memory, Handoffs, Email Messages, Calendar Events, Activities, Audit, Lineage, Graph, and Search.
+- Add server-side filters for every large collection before records reach the UI: Sources, Signals, Memory, Handoffs, Email Messages, Calendar Events, Activities, Audit, Lineage, Graph, and Search.
 - Add tenant-scoped and owner-scope indexes that match the actual filters: tenant, owner/customer scope, status, type, source, subject, updated/created time, and search vector.
 - Introduce a unified search index or materialized search table for global search, command palette record lookup, MCP entity resolution, and agent retrieval.
 - Virtualize large table/card views and avoid client-side filtering over capped result sets.
-- Materialize high-volume access scope where needed, especially for context entries, raw context sources, signal groups, email messages, calendar events, and audit events.
+- Materialize high-volume access scope where needed, especially for context entries, Sources, signal groups, email messages, calendar events, and audit events.
 
-Acceptance target: a tenant with 500k Raw Context sources, 500k Signals, and 50k Memory entries still has fast scoped search, filter, and drawer open flows without requiring pagination controls.
+Acceptance target: a tenant with 500k Sources, 500k Signals, and 50k Memory entries still has fast scoped search, filter, and drawer open flows without requiring pagination controls.
 
-### 4. Raw Context Extraction Throughput
+### 4. Source Extraction Throughput
 
 Make extraction high-recall, conservative, idempotent, and resilient under load.
 
 Key changes:
 
-- Route app, REST, MCP, CLI, Email, Activities, attachments, and reprocess flows through one durable Raw Context processing service.
+- Route app, REST, MCP, CLI, Email, Activities, attachments, and reprocess flows through one durable Source processing service.
 - Keep a short synchronous attempt for good UX, then continue through a durable job when processing exceeds the request budget.
 - Make `source_ref` idempotency include tenant, source type, actor/user, source label, selected subjects, provider IDs, and document hash.
 - Persist extraction attempt metadata: model/provider, prompt version, packet hash, attempt count, status, failure code, and repaired JSON status.
@@ -1389,7 +1389,7 @@ Keep semantic retrieval useful without making pgvector a hard dependency or runa
 Key changes:
 
 - Keep lexical/deterministic fallback paths for every retrieval flow.
-- Track embedding coverage by entity type and tenant: Raw Context, Context Entries, Signal Groups, Memory, and source artifacts.
+- Track embedding coverage by entity type and tenant: Source, Context Entries, Signal Groups, Memory, and source artifacts.
 - Add embedding backpressure, model/dimension compatibility checks, stale embedding detection, and re-embedding migration plans.
 - Document pgvector/HNSW index strategy for serverless Postgres, including index build timing and operational caveats.
 - Avoid embedding low-value filtered sources and duplicate raw payloads.
@@ -1453,7 +1453,7 @@ Make scale visible before users feel it.
 Key changes:
 
 - Add first-class metrics for request latency, query latency, queue lag, extraction throughput, model latency, provider sync latency, writeback latency, and agent tool latency.
-- Add tenant quotas and soft limits for Raw Context ingestion, extraction jobs, mailbox/calendar sync volume, embedding jobs, agent turns, and MCP traffic.
+- Add tenant quotas and soft limits for Source ingestion, extraction jobs, mailbox/calendar sync volume, embedding jobs, agent turns, and MCP traffic.
 - Add global REST, MCP, and Workspace Agent rate limiting after 0.9: tenant, actor/API-key, IP, and cost-aware request budgets backed by a shared store for multi-instance deployments.
 - Add graceful degradation states: retrieval degraded, extraction queued, sync throttled, model unavailable, embeddings catching up, and writeback delayed.
 - Add load tests and synthetic large-tenant fixtures to CI or release gates.
@@ -1483,7 +1483,7 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 
 ### 0.9
 
-- Raw Context from app, REST, MCP, CLI, email, activity, and agent attachments flows through one durable ingestion path with consistent receipts.
+- Source from app, REST, MCP, CLI, email, activity, and agent attachments flows through one durable ingestion path with consistent receipts.
 - A non-trivial customer source creates useful Signals or an actionable failure reason, without brittle JSON/provider failures becoming dead ends.
 - Signal readiness and promotion behavior are calibrated, explainable, and tested against a realistic GTM corpus.
 - Agents can request one Action Context packet that explains Memory, Signals, stale context, policy, system ownership, allowed actions, warnings, required review when risk demands it, and proof trail.
@@ -1491,26 +1491,26 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 - Risky writes are never silent. Users can preview, approve, reject, retry, or inspect them.
 - Proof-grade lineage connects source, Signal, Memory, retrieval, Handoff, writeback, and audit for first-class workflows.
 - Member, manager, admin, REST, MCP, CLI, and Workspace Agent access boundaries are covered by parity tests.
-- Product navigation and docs make the core loop obvious: Raw Context -> Signals -> Memory -> Briefing / Active Context -> Handoffs / Writeback -> Audit.
+- Product navigation and docs make the core loop obvious: Sources -> Signals -> Memory -> Briefing / Active Context -> Handoffs / Writeback -> Audit.
 - Email, Activity, Automations, Sequences, Graph, direct Memory creation, and manual writeback testing are placed at the right feature altitude without breaking existing routes.
 
 ### 1.0
 
 - CRMy can be deployed against serverless Postgres without connection exhaustion, startup migration races, or health-check query storms.
-- High-volume Context pages remain search-first and responsive against synthetic tenants with hundreds of thousands of Raw Context sources and Signals.
+- High-volume Context pages remain search-first and responsive against synthetic tenants with hundreds of thousands of Sources and Signals.
 - Durable jobs recover after worker crashes, cold starts, provider timeouts, and deploys without duplicate Signals, duplicate writes, or permanently stuck processing states.
 - Mailbox, calendar, CRM, warehouse, and custom API/MCP source sync can resume from page-level checkpoints and explain skipped/internal/low-value sources.
 - Workspace Agent and MCP work can resume through persisted turn events and safe polling when streams disconnect or instances restart.
 - Hosted multi-instance deployments satisfy the [Multi-Instance Runtime Plan](multi-instance-runtime-plan.md): separate app/worker/migration roles, durable queue leases, durable MCP session catalog, explicit session routing or expiry behavior, and cross-instance recovery tests.
 - Lineage, audit, retrieval, and writeback proof trails remain queryable through indexed edges, retention/export, and precomputed summaries.
 - CRMy can be deployed self-hosted by an enterprise team, connected to CRM and warehouse systems, governed by scoped actors/policies, and used by agents for read/write revenue workflows with audit-safe execution.
-- Hosted System Connections default to CRMy-managed Google/Microsoft OAuth apps so ordinary SaaS tenants can connect mailbox and calendar without deployment-level secrets; enterprise tenants can bring tenant-owned OAuth apps when they need custom consent, security review, publisher identity, or domain app restrictions.
+- Hosted Context Connectors default to CRMy-managed Google/Microsoft OAuth apps so ordinary SaaS tenants can connect mailbox and calendar without deployment-level secrets; enterprise tenants can bring tenant-owned OAuth apps when they need custom consent, security review, publisher identity, or domain app restrictions.
 - Hosted browser deployments use session storage patterns appropriate for production SaaS, not long-lived bearer tokens in `localStorage`, while local/dev/self-hosted setup remains fast and understandable.
 - Developers can build against stable SDKs and MCP tools without reverse-engineering app behavior.
 - Admins can prove what happened, why it happened, who approved it, which systems changed, and what context the agent used.
 - Certified agent runtimes can complete the canonical control-plane flow: resolve customer, retrieve briefing, request Action Context, route human review or writeback preview, and inspect Lineage.
 - Action Context, proof receipts, Handoffs, source health, and policy decisions are stable contracts across MCP, REST, CLI, Workspace Agent, workflows, and sequences.
-- Product-knowledge retrieval, when configured, participates in policy, citation, freshness, eval, and proof flows without merging global product truth into customer Memory.
+- Knowledge retrieval, when configured, participates in policy, citation, freshness, eval, and proof flows without merging Trusted Facts into customer Memory.
 
 ## Test Plan
 
@@ -1521,22 +1521,22 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 - **Extraction tests:** golden GTM corpus covers transcripts, emails, call notes, activity debriefs, buying process, success criteria, forecast signals, stakeholders, commitments, risks, next steps, and proposed records.
 - **Signal tests:** calibrated readiness scoring, account-scoped grouping, duplicate Memory avoidance, conflict creation, source weighting, typed completeness, and manual confirmation behavior.
 - **Agent tests:** Action Context packets include Memory, Signals, stale context, policy, SOR ownership, proof links, operating mode, and review requirements when risk demands them; write plans preview external changes; HITL gates risky actions; task summaries include source-system effects; and audit links resolve correctly.
-- **Lineage tests:** source-to-action proof trails connect Raw Context, activity/email/meeting, Signal, Memory, briefing retrieval, Handoff, writeback, and audit for first-class workflows.
+- **Lineage tests:** source-to-action proof trails connect Source, activity/email/meeting, Signal, Memory, briefing retrieval, Handoff, writeback, and audit for first-class workflows.
 - **Scope parity tests:** REST, MCP, CLI, Workspace Agent, search, graph, lineage, Handoffs, email, activity, systems-of-record, Automations, and Sequences enforce the same member/manager/admin visibility model.
 - **Retrieval tests:** lexical fallback and pgvector retrieval both find account-scoped candidates without leaking inaccessible records.
 - **Security tests:** no arbitrary SQL writes, scoped actors cannot access unmapped systems, field-level authority is enforced, and secrets are never exposed in logs or audit payloads.
 - **Hosted browser auth tests:** production browser auth uses httpOnly/session-backed or equivalent short-lived token handling, rejects CSRF-risky mutations, supports logout/session revocation, and still allows the documented local setup path to work without extra manual security setup.
 - **Product-surface tests:** member, manager, and admin navigation show the correct core/supporting/admin/advanced surfaces; legacy routes still resolve; user-facing labels avoid `Signal Group`, generic workflow-builder framing, inbox replacement framing, and CRM replacement framing.
-- **First-run smoke tests:** start from an empty database, migrate, run `init --demo`, prove the seeded Raw Context -> Signal -> Memory -> briefing/action-context path through CLI/API/MCP, and load the UI against that workspace.
+- **First-run smoke tests:** start from an empty database, migrate, run `init --demo`, prove the seeded Sources -> Signals -> Memory -> briefing/action-context path through CLI/API/MCP, and load the UI against that workspace.
 - **Serverless Postgres tests:** pooled connection budget, statement timeouts, startup without runtime migrations, shallow/deep health behavior, and provider-specific migration guidance.
-- **Scale fixtures:** synthetic tenants with 500k Raw Context sources, 500k Signals, 50k Memory entries, large audit history, and active mailbox/calendar/SOR sync history.
+- **Scale fixtures:** synthetic tenants with 500k Sources, 500k Signals, 50k Memory entries, large audit history, and active mailbox/calendar/SOR sync history.
 - **Query-plan tests:** `EXPLAIN` gates for high-volume list/search/detail endpoints, including Context Browser, Signals, Memory, Handoffs, Email Messages, Calendar Events, Audit, Search, Graph, and Lineage.
 - **Queue recovery tests:** worker crash/restart, stale lock recovery, retry/backoff, dead-letter handling, context outbox recovery, raw extraction retry, embedding catch-up, and agent-turn continuation.
 - **Source-sync scale tests:** provider pagination, cursor replay, partial-page failure, skipped-source aggregate stats, dedupe, row-level errors, and checkpoint resume for mailbox, calendar, CRM, and warehouse sync.
 - **Agent/MCP resilience tests:** interrupted SSE stream, polling recovery, multi-instance routing, stale MCP session behavior, tool-call idempotency, broad-query limits, and scoped denied access.
 - **Runtime certification tests:** canonical control-plane flows pass across Workspace Agent, MCP clients, REST-only agents, and supported external agent runtimes without runtime-specific trust shortcuts.
 - **Control-plane contract tests:** Action Context, proof receipts, Handoff packets, source health, and policy decisions keep stable schemas and consistent behavior across MCP, REST, CLI, UI, workflows, and sequences.
-- **Product-knowledge governance tests:** product claims remain separate from customer Memory, customer-facing drafts exclude stale/unapproved/internal-only/unsupported claims, and retrieval receipts link citations back to approved sources.
+- **Knowledge governance tests:** Trusted Facts remain separate from customer Memory, customer-facing drafts exclude stale/unapproved/internal-only/unsupported facts, and retrieval receipts link citations back to approved sources.
 
 ## Implementation Notes
 

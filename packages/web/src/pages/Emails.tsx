@@ -95,7 +95,7 @@ type EmailMessage = {
   use_case_id?: string | null;
   use_case_name?: string | null;
   activity_id?: string | null;
-	  raw_context_source_id?: string | null;
+	  source_id?: string | null;
 	  mailbox_email_address?: string | null;
 	  mailbox_display_name?: string | null;
 	  reply_to_email_message_id?: string | null;
@@ -155,7 +155,7 @@ const MAILBOX_PROVIDER_COPY: Record<MailboxProvider, {
   google: {
     label: 'Gmail',
     title: 'Set up Gmail',
-    description: 'Capture customer replies from Google Workspace mailboxes and process them as Sources.',
+    description: 'Capture customer replies from Google Workspace mailboxes and save them as Sources.',
     credentialLabel: 'Google Cloud OAuth app',
     callbackPath: '/api/v1/mailbox/oauth/google/callback',
   },
@@ -660,10 +660,10 @@ function MessageDetail({
 	                    <span className="text-foreground">{String(message.activity_id).slice(0, 8)}</span>
 	                  </div>
 	                )}
-	                {message.raw_context_source_id && (
+	                {message.source_id && (
 	                  <div>
 	                    <span className="text-muted-foreground">Source </span>
-	                    <span className="text-foreground">{String(message.raw_context_source_id).slice(0, 8)}</span>
+	                    <span className="text-foreground">{String(message.source_id).slice(0, 8)}</span>
 	                  </div>
 	                )}
 	                {(message.reply_to_email_message_id || message.conversation_root_email_message_id) && (
@@ -1417,7 +1417,7 @@ export default function EmailsPage() {
                     <input type="checkbox" checked={setupContextSync} onChange={event => setSetupContextSync(event.target.checked)} className="mt-1" />
                     <span>
                       <span className="block text-sm font-semibold text-foreground">Use email for customer context</span>
-                      <span className="block text-xs text-muted-foreground">Read customer-facing threads, link them to records, and process useful messages into Sources, Signals, and Memory.</span>
+                      <span className="block text-xs text-muted-foreground">Read customer-facing threads, link them to records, save useful messages as Sources, and extract Signals and Memory.</span>
                     </span>
                   </label>
                   <label className="flex items-start gap-3 rounded-lg border border-border bg-background/40 p-3">

@@ -400,7 +400,7 @@ test('admin actor connection coverage excludes provider token fields', async () 
   assert.match(routerSource, /'processed_events'/);
   assert.match(routerSource, /'total_events'/);
   assert.match(routerSource, /'last_event_at'/);
-  assert.match(routerSource, /raw_context_source_count/);
+  assert.match(routerSource, /source_count/);
   assert.match(routerSource, /signal_count/);
   assert.match(routerSource, /memory_count/);
   assert.doesNotMatch(routerSource.match(/router\.get\('\/admin\/actor-connections'[\s\S]*?router\.get\('\/admin\/users'/)?.[0] ?? '', /access_token_enc|refresh_token_enc|provider_account_id|scopes/);
@@ -413,7 +413,7 @@ test('admin actor connection coverage excludes provider token fields', async () 
   assert.match(actorsSettings, /useAdminActorConnections/);
   assert.match(actorsSettings, /connectionSummaryLine/);
   assert.match(actorsSettings, /Connected \{connectionDate\(record\.created_at\)\}/);
-  assert.match(actorsSettings, /Raw Context source/);
+  assert.match(actorsSettings, /Source/);
   assert.match(actorsSettings, /Memory entry/);
   assert.match(actorsSettings, /Email connected/);
   assert.match(actorsSettings, /No email/);
@@ -481,7 +481,7 @@ test('scoped overview and personal connection setup keep mailbox/calendar OAuth 
   assert.match(emailsPage, /Create provider drafts when available/);
   assert.match(emailsPage, /CRMy filters for customer conversations/);
   assert.match(emailsPage, /Ask an admin to enable .* connections/);
-  assert.match(emailsPage, /Open System Connections/);
+  assert.match(emailsPage, /Open Context Connectors/);
   assert.match(emailsPage, /mailboxConnections = connections\.filter/);
   assert.doesNotMatch(emailsPage, /Set up inbound webhook/);
   assert.doesNotMatch(emailsPage, /Open inbound setup/);
@@ -496,7 +496,7 @@ test('scoped overview and personal connection setup keep mailbox/calendar OAuth 
   assert.match(activitiesPage, /read-only calendar access/);
   assert.match(activitiesPage, /CRMy does not create invites from this setup/);
   assert.match(activitiesPage, /Ask an admin to enable .* connections/);
-  assert.match(activitiesPage, /Open System Connections/);
+  assert.match(activitiesPage, /Open Context Connectors/);
   assert.doesNotMatch(activitiesPage, /Redirect path/);
   assert.doesNotMatch(activitiesPage, /Access model/);
   assert.doesNotMatch(activitiesPage, /Keep Activities focused on customer meetings/);
@@ -833,7 +833,7 @@ test('high-volume context surfaces use stable timestamp plus id cursors', async 
 });
 
 test('live provider certification docs cover real OAuth provider behavior before production claims', async () => {
-  const certification = await readFile(new URL('../../../docs/provider-certification-0.9.3.md', import.meta.url), 'utf8');
+  const certification = await readFile(new URL('../../../docs/provider-certification-0.9.4.md', import.meta.url), 'utf8');
   const readme = await readFile(new URL('../../../README.md', import.meta.url), 'utf8');
   const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
 
@@ -847,15 +847,15 @@ test('live provider certification docs cover real OAuth provider behavior before
     'CRMy-managed hosted OAuth app',
     'Tenant-owned enterprise OAuth app',
     'Self-hosted environment-managed OAuth app',
-    'Raw Context, Signals, Memory candidates, and Lineage',
+    'Sources, Signals, Memory candidates, and Lineage',
     'CRMy-authored context, not customer-authored evidence',
     'Disconnect removes stored OAuth tokens',
   ]) {
     assert.match(certification, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 
-  assert.match(readme, /provider-certification-0\.9\.3\.md/);
-  assert.match(guide, /provider-certification-0\.9\.3\.md/);
+  assert.match(readme, /provider-certification-0\.9\.4\.md/);
+  assert.match(guide, /provider-certification-0\.9\.4\.md/);
 });
 
 test('production database TLS requires verified certificates unless explicitly overridden', async () => {
@@ -1523,7 +1523,7 @@ function registrySchemasForFixture(registry = {}) {
   return schemas;
 }
 
-test('Raw Context golden corpus covers core GTM extraction scenarios', async () => {
+test('Source golden corpus covers core GTM extraction scenarios', async () => {
   const corpusPath = new URL('../src/evals/fixtures/raw-context-golden-corpus.json', import.meta.url);
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
   assert.ok(Array.isArray(corpus));
@@ -1594,7 +1594,7 @@ test('Raw Context golden corpus covers core GTM extraction scenarios', async () 
   assert.equal(duplicate.expected_behavior, 'dedupe_existing_receipt');
 });
 
-test('Raw Context custom registry corpus respects tenant Memory vocabulary', async () => {
+test('Source custom registry corpus respects tenant Memory vocabulary', async () => {
   const corpusPath = new URL('../src/evals/fixtures/raw-context-custom-registry-corpus.json', import.meta.url);
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
   assert.ok(Array.isArray(corpus));
@@ -2232,7 +2232,7 @@ class FakeExtractionDb {
   }
 }
 
-test('Raw Context corpus can replay through extraction write and grouping pipeline without a live model', async () => {
+test('Source corpus can replay through extraction write and grouping pipeline without a live model', async () => {
   const corpusPath = new URL('../src/evals/fixtures/raw-context-golden-corpus.json', import.meta.url);
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
   const fixture = corpus.find(item => item.id === 'procurement_and_security_path');
@@ -2261,7 +2261,7 @@ test('Raw Context corpus can replay through extraction write and grouping pipeli
   assert.ok(db.attempts[0].input_summary.extraction_packet.matched_subject_count > 0);
 });
 
-test('Raw Context corpus replay records a clean no-context receipt without creating Signals', async () => {
+test('Source corpus replay records a clean no-context receipt without creating Signals', async () => {
   const corpusPath = new URL('../src/evals/fixtures/raw-context-golden-corpus.json', import.meta.url);
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
   const fixture = corpus.find(item => item.id === 'no_customer_specific_context');
@@ -2487,18 +2487,18 @@ test('context_ingest_auto routes proposed records to a deduped Handoff and reuse
   assert.equal(first.skipped, 0);
   assert.equal(first.proposed_records.length, 1);
   assert.equal(first.handoff_requests.length, 1);
-  assert.equal(first.raw_context_source.status, 'needs_review');
-  assert.equal(first.raw_context_source.metadata.failure_code, 'needs_record_review');
+  assert.equal(first.source.status, 'needs_review');
+  assert.equal(first.source.metadata.failure_code, 'needs_record_review');
   assert.equal(db.hitlRequests.length, 1);
   assert.equal(db.hitlRequests[0].action_type, 'record.create.review');
   assert.equal(db.hitlRequests[0].action_payload.dedupe_key, 'opportunity:Nike EMEA customer success rollout'.toLowerCase());
   assert.equal(db.payloads[0].proposed_records.length, 1);
 
   const second = await tool.handler(input, actor);
-  assert.equal(second.duplicate_of_raw_context_source_id, first.raw_context_source.id);
-  assert.equal(second.message, 'This Raw Context source was already processed. Returning the existing receipt instead of extracting it again.');
+  assert.equal(second.duplicate_of_source_id, first.source.id);
+  assert.equal(second.message, 'This Source was already processed. Returning the existing receipt instead of extracting it again.');
   assert.equal(second.entries_created, 0);
-  assert.equal(second.raw_context_source.status, 'needs_review');
+  assert.equal(second.source.status, 'needs_review');
   assert.equal(db.hitlRequests.length, 1);
 });
 
@@ -2557,7 +2557,7 @@ test('context_ingest_auto duplicate source receipts do not create more Signals o
   });
 
   const result = await tool.handler(input, actor);
-  assert.equal(result.duplicate_of_raw_context_source_id, 'ffffffff-ffff-4fff-8fff-ffffffffffff');
+  assert.equal(result.duplicate_of_source_id, 'ffffffff-ffff-4fff-8fff-ffffffffffff');
   assert.equal(result.entries_created, 1);
   assert.equal(result.signals_created, 1);
   assert.equal(result.memory_created, 0);
@@ -2566,7 +2566,7 @@ test('context_ingest_auto duplicate source receipts do not create more Signals o
   assert.equal(db.hitlRequests.length, 0);
 });
 
-test('Raw Context source list does not leak no-subject peer receipts to scoped users', async () => {
+test('Source list does not leak no-subject peer receipts to scoped users', async () => {
   const db = {
     queries: [],
     params: [],
@@ -2596,7 +2596,7 @@ test('Raw Context source list does not leak no-subject peer receipts to scoped u
   ]);
 });
 
-test('Raw Context source list still returns own no-subject receipts when no owned records are visible', async () => {
+test('Source list still returns own no-subject receipts when no owned records are visible', async () => {
   const db = {
     queries: [],
     params: [],
@@ -2880,7 +2880,7 @@ test('Record resolution golden corpus covers account-scoped and ambiguous GTM re
   }
 });
 
-test('Raw Context model candidates do not over-link ambiguous child records', async () => {
+test('Source model candidates do not over-link ambiguous child records', async () => {
   await withMockSubjectDetectionLLM([{
     name: 'Pegasus expansion',
     entity_type: 'opportunity',
@@ -2904,7 +2904,7 @@ test('Raw Context model candidates do not over-link ambiguous child records', as
   });
 });
 
-test('Raw Context account-only matches can propose model-detected new child records', async () => {
+test('Source account-only matches can propose model-detected new child records', async () => {
   await withMockSubjectDetectionLLM([{
     name: 'Nike EMEA customer success rollout',
     entity_type: 'opportunity',
@@ -2964,7 +2964,7 @@ test('customer_record_resolve requires context read scope for scoped agent actor
   assert.equal(visible.some(tool => tool.name === 'customer_record_resolve'), false);
 });
 
-test('Raw Context ingest surfaces use the shared Subject Graph resolver', async () => {
+test('Source ingest surfaces use the shared Subject Graph resolver', async () => {
   const contextToolsSource = await readFile(new URL('../src/mcp/tools/context-entries.ts', import.meta.url), 'utf8');
   const restRouterSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
   assert.match(contextToolsSource, /resolveSubjectGraph/);
@@ -3000,7 +3000,7 @@ test('Customer Email and Activity enrich association through Subject Graph', asy
   }
 });
 
-test('Raw Context subject detection does not over-link duplicate contacts inside one account scope', async () => {
+test('Source subject detection does not over-link duplicate contacts inside one account scope', async () => {
   const detected = await detectRawContextSubjects(
     new FakeAmbiguousAccountChildDb(),
     baseInput.tenantId,
@@ -3014,7 +3014,7 @@ test('Raw Context subject detection does not over-link duplicate contacts inside
   assert.ok(detected.skipped.some(item => item.name === 'Maya Patel' && item.reason === 'ambiguous_within_account_scope'));
 });
 
-test('Raw Context subject detection does not over-link duplicate opportunities inside one account scope', async () => {
+test('Source subject detection does not over-link duplicate opportunities inside one account scope', async () => {
   const detected = await detectRawContextSubjects(
     new FakeAmbiguousAccountChildDb(),
     baseInput.tenantId,
@@ -3028,7 +3028,7 @@ test('Raw Context subject detection does not over-link duplicate opportunities i
   assert.ok(detected.skipped.some(item => item.name === 'Pegasus expansion' && item.reason === 'ambiguous_within_account_scope'));
 });
 
-test('Raw Context subject detection does not over-link duplicate use cases inside one account scope', async () => {
+test('Source subject detection does not over-link duplicate use cases inside one account scope', async () => {
   const detected = await detectRawContextSubjects(
     new FakeAmbiguousAccountChildDb(),
     baseInput.tenantId,
@@ -3042,7 +3042,7 @@ test('Raw Context subject detection does not over-link duplicate use cases insid
   assert.ok(detected.skipped.some(item => item.name === 'Forecast automation' && item.reason === 'ambiguous_within_account_scope'));
 });
 
-test('Raw Context subject detection narrows child records to the matched account', async () => {
+test('Source subject detection narrows child records to the matched account', async () => {
   const detected = await detectRawContextSubjects(
     new FakeRawSubjectDb(),
     baseInput.tenantId,
@@ -3059,7 +3059,7 @@ test('Raw Context subject detection narrows child records to the matched account
   assert.match(detected.resolution_summary, /Matched Nike/);
 });
 
-test('Raw Context subject detection uses account aliases to scope child matches', async () => {
+test('Source subject detection uses account aliases to scope child matches', async () => {
   const detected = await detectRawContextSubjects(
     new FakeRawSubjectDb(),
     baseInput.tenantId,
@@ -3072,7 +3072,7 @@ test('Raw Context subject detection uses account aliases to scope child matches'
   assert.equal(detected.subjects.some(subject => subject.id === 'opp-acme-pegasus'), false);
 });
 
-test('Raw Context subject detection does not over-link same-named contacts without account scope', async () => {
+test('Source subject detection does not over-link same-named contacts without account scope', async () => {
   const detected = await detectRawContextSubjects(
     new FakeRawSubjectDb(),
     baseInput.tenantId,
@@ -3085,7 +3085,7 @@ test('Raw Context subject detection does not over-link same-named contacts witho
   assert.ok(detected.skipped.some(item => item.reason === 'ambiguous_without_account_scope'));
 });
 
-test('Raw Context subject detection does not over-link same-named opportunities without account scope', async () => {
+test('Source subject detection does not over-link same-named opportunities without account scope', async () => {
   const detected = await detectRawContextSubjects(
     new FakeRawSubjectDb(),
     baseInput.tenantId,
@@ -3098,7 +3098,7 @@ test('Raw Context subject detection does not over-link same-named opportunities 
   assert.ok(detected.skipped.some(item => item.name === 'Pegasus expansion' && item.reason === 'ambiguous_without_account_scope'));
 });
 
-test('Raw Context subject detection scopes use cases under the matched account', async () => {
+test('Source subject detection scopes use cases under the matched account', async () => {
   const detected = await detectRawContextSubjects(
     new FakeRawSubjectDb(),
     baseInput.tenantId,
@@ -3443,7 +3443,7 @@ test('GTM tool-choice evals route first calls to the right MCP front door', asyn
       forbidden_tools: ['entity_resolve'],
     },
     {
-      name: 'ingest messy meeting notes through Raw Context',
+      name: 'ingest messy meeting notes through Sources',
       prompt: 'These meeting notes mention procurement blockers and a new champion. Add the useful context.',
       expected_tool: 'context_ingest_auto',
       arguments: { document_text: 'Procurement is blocked until security signs off. Maya is the champion.', source_label: 'Tool choice eval notes' },
@@ -3699,7 +3699,7 @@ test('Workspace Agent injects stable idempotency keys for retry-sensitive tools'
           if (round > 1) return { content: 'Context attempt recorded.', tool_calls: [] };
           assert.equal(toolDefs.some(tool => tool.name === 'context_ingest_auto'), true);
           return {
-            content: 'I will process this through Raw Context.',
+            content: 'I will process this through Sources.',
             tool_calls: [{
               id: `context-${round}`,
               name: 'context_ingest_auto',
@@ -3866,18 +3866,18 @@ class FakeRawContextRecoveryDb {
   }
 }
 
-test('recoverOperationalJob can retry stale Raw Context receipts', async () => {
+test('recoverOperationalJob can retry stale Source receipts', async () => {
   const db = new FakeRawContextRecoveryDb();
   const result = await recoverOperationalJob(
     db,
     recoveryActor,
-    'raw_context_sources',
+    'sources',
     db.row.id,
     'retry',
     'retry interrupted extraction',
   );
 
-  assert.equal(result.queue_name, 'raw_context_sources');
+  assert.equal(result.queue_name, 'sources');
   assert.equal(result.previous_status, 'processing');
   assert.equal(result.new_status, 'pending');
   assert.equal(db.recoveryLog.length, 1);
@@ -4153,7 +4153,7 @@ test('MCP manifests keep scoped agents focused and expose the router first', asy
 
   const guide = postMeetingTools.find(tool => tool.name === 'tool_guide');
   assert.ok(guide);
-  const result = await guide.handler({ workflow: 'ingest_raw_context' }, memberActor);
+  const result = await guide.handler({ workflow: 'ingest_sources' }, memberActor);
   assert.equal(result.recommended_tools.includes('context_ingest_auto'), true);
   assert.match(result.avoid_tools.join(' '), /context_add/);
   const signalGuide = await guide.handler({ workflow: 'review_signals' }, memberActor);
@@ -4167,7 +4167,7 @@ test('retry-sensitive MCP operations expose idempotency keys', () => {
   const toolsByName = new Map(getAllTools({}).map(tool => [tool.name, tool]));
   for (const name of [
     'activity_add_context',
-    'context_raw_source_reprocess',
+    'context_source_reprocess',
     'email_message_process',
     'email_message_ignore',
     'email_message_link',
@@ -4373,7 +4373,7 @@ class FakeRawContextAccessDb {
   }
 }
 
-test('Raw Context get allows own actor receipts and hides peer no-subject receipts', async () => {
+test('Source get allows own actor receipts and hides peer no-subject receipts', async () => {
   const db = new FakeRawContextAccessDb();
   const actor = {
     tenant_id: recoveryActor.tenant_id,
@@ -4382,11 +4382,11 @@ test('Raw Context get allows own actor receipts and hides peer no-subject receip
     role: 'member',
     scopes: ['context:read'],
   };
-  const tool = getAllTools(db).find(candidate => candidate.name === 'context_raw_source_get');
+  const tool = getAllTools(db).find(candidate => candidate.name === 'context_source_get');
   assert.ok(tool);
 
   const own = await tool.handler({ id: 'own-source' }, actor);
-  assert.equal(own.raw_context_source.id, '88888888-8888-4888-8888-888888888801');
+  assert.equal(own.source.id, '88888888-8888-4888-8888-888888888801');
 
   await assert.rejects(
     () => tool.handler({ id: 'peer-source' }, actor),
@@ -4561,7 +4561,6 @@ test('Briefing REST contract matches the actual agent-facing briefing envelope',
   const cliClient = await readFile(new URL('../../cli/src/client.ts', import.meta.url), 'utf8');
   const cliBriefing = await readFile(new URL('../../cli/src/commands/briefing.ts', import.meta.url), 'utf8');
   const cliActionContext = await readFile(new URL('../../cli/src/commands/action-context.ts', import.meta.url), 'utf8');
-  const readme = await readFile(new URL('../../../README.md', import.meta.url), 'utf8');
   const mcpDocs = await readFile(new URL('../../../docs/mcp-tools.md', import.meta.url), 'utf8');
   const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
 
@@ -4619,9 +4618,6 @@ test('Briefing REST contract matches the actual agent-facing briefing envelope',
   assert.match(contextRepo, /const subjectTypes = subjects\.map/);
   assert.match(contextRepo, /FROM unnest\(\$2::text\[\], \$3::uuid\[\]\) AS scoped\(subject_type, subject_id\)/);
   assert.doesNotMatch(contextRepo, /subject_id = ANY\(\$2::uuid\[\]\)/);
-  assert.match(readme, /How CRMy Reduces Token Use/);
-  assert.match(readme, /budget profiles \(`tiny`, `standard`, `deep`, `evidence_heavy`\)/);
-  assert.match(readme, /evidence_mode: "summary"/);
   assert.match(mcpDocs, /staleness_warnings/);
   assert.match(mcpDocs, /dropped_entries/);
   assert.match(mcpDocs, /token_budget_profile/);
@@ -4635,7 +4631,7 @@ test('Briefing REST contract matches the actual agent-facing briefing envelope',
   assert.doesNotMatch(mcpDocs, /stale_warnings/);
 });
 
-test('email and calendar sources remain traceable and preserve authorship semantics in Raw Context UI', async () => {
+test('email and calendar sources remain traceable and preserve authorship semantics in Sources UI', async () => {
   const extractionSource = await readFile(new URL('../src/agent/extraction.ts', import.meta.url), 'utf8');
   const emailSource = await readFile(new URL('../src/services/customer-email.ts', import.meta.url), 'utf8');
   const activitySource = await readFile(new URL('../src/services/customer-activity.ts', import.meta.url), 'utf8');
@@ -4650,14 +4646,14 @@ test('email and calendar sources remain traceable and preserve authorship semant
   assert.match(emailSource, /evidence_weight: 'self_authored_action_context'/);
   assert.match(emailSource, /source_authorship: 'customer_or_external'/);
   assert.match(emailSource, /customer_authored: true/);
-  assert.match(activitySource, /raw_context_source_id: rawSource\?\.id/);
+  assert.match(activitySource, /source_id: rawSource\?\.id/);
   assert.match(activitySource, /signals_created: extraction\.signals_created/);
   assert.match(activitySource, /memory_created: extraction\.memory_created/);
   assert.match(observationsSource, /calendar_event/);
   assert.match(observationsSource, /Calendar events/);
   assert.match(observationsSource, /Seller-authored: treat as our words/);
   assert.match(observationsSource, /Customer-authored evidence/);
-  assert.match(observationsSource, /tab=lineage&raw_context_source_id=\$\{source\.id\}/);
+  assert.match(observationsSource, /tab=lineage&source_id=\$\{source\.id\}/);
 });
 
 test('Handoff and writeback receipts preserve Action Context metadata for lineage proof', async () => {
@@ -4774,7 +4770,7 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   const readme = await readFile(new URL('../../../README.md', import.meta.url), 'utf8');
   const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
   const mcpDocs = await readFile(new URL('../../../docs/mcp-tools.md', import.meta.url), 'utf8');
-  const productKnowledgeDocs = await readFile(new URL('../../../docs/governed-product-knowledge-retrieval.md', import.meta.url), 'utf8');
+  const knowledgeDocs = await readFile(new URL('../../../docs/governed-product-knowledge-retrieval.md', import.meta.url), 'utf8');
   const roadmap = await readFile(new URL('../../../docs/roadmap-0.8-1.0.md', import.meta.url), 'utf8');
   const cliServerSource = await readFile(new URL('../../cli/src/commands/server.ts', import.meta.url), 'utf8');
   const seedScript = await readFile(new URL('../scripts/seed.ts', import.meta.url), 'utf8');
@@ -4793,7 +4789,7 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   const schemasSource = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
 
   const releaseVersion = JSON.parse(rootPackage).version;
-  assert.equal(releaseVersion, '0.9.3');
+  assert.equal(releaseVersion, '0.9.4');
   for (const pkg of [sharedPackage, serverPackage, cliPackage, webPackage, openclawPackage]) {
     assert.equal(JSON.parse(pkg).version, releaseVersion);
   }
@@ -4802,17 +4798,14 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   assert.match(readme, new RegExp(`Current version: \`${releaseVersion}\``));
   assert.match(releaseNotes, new RegExp(`# CRMy v${releaseVersion}`));
   assert.match(changelog, new RegExp(`## \\[${releaseVersion}\\]`));
-  assert.match(readme, /Retrieve approved, source-grounded product, pricing, implementation, security, and competitive claims/);
-  assert.doesNotMatch(readme, /source-backed retrieval ships|Product Knowledge.*Phase 1 MCP contract/);
-  assert.match(releaseNotes, /governed Product Knowledge retrieval, receipts, briefing\/Action Context\/email grounding, CLI, and admin review controls/);
-  assert.doesNotMatch(releaseNotes, /Product Knowledge is Phase 1|source-backed retrieval is not yet configured/);
-  assert.match(guide, /Governed Product Knowledge retrieval is also available/);
-  assert.doesNotMatch(guide, /governed product knowledge retrieval remain roadmap/);
+  assert.match(releaseNotes, /AI briefing summaries now include approved Trusted Facts/);
+  assert.match(releaseNotes, /Knowledge Sources remains MCP-only/);
+  assert.match(guide, /Governed Knowledge retrieval is also available/);
   assert.match(mcpDocs, /### knowledge_claim_review/);
   assert.match(mcpDocs, /### knowledge_conflicts_detect/);
-  assert.match(productKnowledgeDocs, /Phases 1-7 of the governed claim\s+path have landed in 0\.9\.3/);
-  assert.doesNotMatch(productKnowledgeDocs, /first-class `POST \/api\/v1\/knowledge\/retrieve` endpoint remains planned/);
-  assert.match(roadmap, /Phases 1-7 of the governed claim path landed in 0\.9\.3/);
+  assert.match(knowledgeDocs, /Phases 1-7 of the Trusted Fact\s+path/);
+  assert.doesNotMatch(knowledgeDocs, /first-class `POST \/api\/v1\/knowledge\/retrieve` endpoint remains planned/);
+  assert.match(roadmap, /Phases 1-7 of the Trusted Fact path landed in 0\.9\.3/);
 
   assert.match(dockerfile, /COPY packages\/web\/package\*\.json packages\/web\//);
   assert.match(dockerfile, /npm run build --workspace=packages\/web[\s\S]*npm run build --workspace=packages\/server/);
@@ -5366,14 +5359,14 @@ class FakeRawContextAttemptRepairDb {
   }
 }
 
-test('data-quality repair can requeue stale Raw Context processing receipts', async () => {
+test('data-quality repair can requeue stale Source processing receipts', async () => {
   const db = new FakeRawContextRepairDb();
-  const dryRun = await repairDataQualityFinding(db, recoveryActor, 'stale_raw_context_sources_processing', {
+  const dryRun = await repairDataQualityFinding(db, recoveryActor, 'stale_sources_processing', {
     dry_run: true,
   });
   assert.equal(dryRun.repaired_count, 4);
 
-  const repaired = await repairDataQualityFinding(db, recoveryActor, 'stale_raw_context_sources_processing', {
+  const repaired = await repairDataQualityFinding(db, recoveryActor, 'stale_sources_processing', {
     dry_run: false,
     limit: 2,
   });
@@ -5381,14 +5374,14 @@ test('data-quality repair can requeue stale Raw Context processing receipts', as
   assert.equal(repaired.event_id, 202);
 });
 
-test('data-quality repair can fail stale Raw Context extraction attempts and requeue work', async () => {
+test('data-quality repair can fail stale Source extraction attempts and requeue work', async () => {
   const db = new FakeRawContextAttemptRepairDb();
-  const dryRun = await repairDataQualityFinding(db, recoveryActor, 'stuck_raw_context_extraction_attempts_running', {
+  const dryRun = await repairDataQualityFinding(db, recoveryActor, 'stuck_source_extraction_attempts_running', {
     dry_run: true,
   });
   assert.equal(dryRun.repaired_count, 1);
 
-  const repaired = await repairDataQualityFinding(db, recoveryActor, 'stuck_raw_context_extraction_attempts_running', {
+  const repaired = await repairDataQualityFinding(db, recoveryActor, 'stuck_source_extraction_attempts_running', {
     dry_run: false,
     limit: 1,
   });
@@ -5396,14 +5389,14 @@ test('data-quality repair can fail stale Raw Context extraction attempts and req
   assert.equal(repaired.event_id, 303);
 });
 
-test('data-quality repair can requeue retryable Raw Context failures', async () => {
+test('data-quality repair can requeue retryable Source failures', async () => {
   const db = new FakeRawContextRepairDb();
-  const dryRun = await repairDataQualityFinding(db, recoveryActor, 'failed_raw_context_sources_retryable', {
+  const dryRun = await repairDataQualityFinding(db, recoveryActor, 'failed_sources_retryable', {
     dry_run: true,
   });
   assert.equal(dryRun.repaired_count, 4);
 
-  const repaired = await repairDataQualityFinding(db, recoveryActor, 'failed_raw_context_sources_retryable', {
+  const repaired = await repairDataQualityFinding(db, recoveryActor, 'failed_sources_retryable', {
     dry_run: false,
     limit: 2,
   });
@@ -6461,7 +6454,7 @@ test('transcript source drops are durable, reviewable, and integrated with activ
   assert.match(fixtureReadme, /CRMY_LOCAL_SOURCE_ROOTS/);
   assert.match(fixtureReadme, /transcript-source create-local/);
   assert.match(fixtureReadme, /S3-compatible test bucket/);
-  assert.match(fixtureReadme, /Raw Context -> Signals -> Memory/);
+  assert.match(fixtureReadme, /Sources -> Signals -> Memory/);
   assert.match(transcript, /Maya Patel, Northstar Labs/);
   assert.match(transcript, /security review/);
   assert.equal(sidecar.account_hint, 'Northstar Labs');

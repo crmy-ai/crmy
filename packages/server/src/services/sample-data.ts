@@ -113,7 +113,7 @@ export async function getSampleDataStatus(db: DbPool, tenantId: string) {
        (SELECT count(*)::int FROM context_entries WHERE tenant_id = $1 AND memory_status = 'signal') as signals,
        (SELECT count(*)::int FROM signal_groups WHERE tenant_id = $1 AND status IN ('ready', 'blocked', 'conflicting')) as signal_groups,
        (SELECT count(*)::int FROM context_entries WHERE tenant_id = $1 AND memory_status = 'active') as memory,
-       (SELECT count(*)::int FROM raw_context_sources WHERE tenant_id = $1) as raw_context_sources,
+       (SELECT count(*)::int FROM raw_context_sources WHERE tenant_id = $1) as sources,
        (SELECT count(*)::int FROM hitl_requests WHERE tenant_id = $1 AND status = 'pending') as handoffs`,
     [tenantId],
   );
@@ -127,7 +127,7 @@ export async function getSampleDataStatus(db: DbPool, tenantId: string) {
       signals: number;
       signal_groups: number;
       memory: number;
-      raw_context_sources: number;
+      sources: number;
       handoffs: number;
     },
   };

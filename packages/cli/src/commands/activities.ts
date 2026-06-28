@@ -126,7 +126,7 @@ export function activitiesCommand(): Command {
     });
 
   cmd.command('process <id>')
-    .description('Process meeting artifacts as Raw Context')
+    .description('Process meeting artifacts as Sources, then extract Signals and Memory')
     .action(async (id) => {
       const client = await getClient();
       const meetingId = await resolveMeetingId(client, id);
@@ -141,7 +141,7 @@ export function activitiesCommand(): Command {
     .option('-t, --text <text>', 'Text content to attach')
     .option('--type <type>', 'notes, transcript, summary, recording, or other', 'notes')
     .option('--source <label>', 'Source label')
-    .option('--no-process', 'Attach without processing as Raw Context')
+    .option('--no-process', 'Attach without processing as a Source')
     .action(async (id, opts) => {
       let text = opts.text as string | undefined;
       if (!text && opts.file) text = await readFile(opts.file, 'utf8');

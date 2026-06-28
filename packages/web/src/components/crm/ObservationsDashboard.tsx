@@ -18,8 +18,8 @@ import {
   useActivities,
   useContextEntries,
   useEmails,
-  useRawContextSources,
-  useReprocessRawContextSource,
+  useSourceProcessingRecords,
+  useReprocessSourceProcessingRecord,
   useSignalGroups,
   useSystemSyncRuns,
 } from '@/api/hooks';
@@ -267,11 +267,11 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
   const [statusFilter, setStatusFilter] = useState<'all' | ObservationStatus>('all');
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
-  const reprocessSource = useReprocessRawContextSource();
+  const reprocessSource = useReprocessSourceProcessingRecord();
   const activitiesQ = useActivities({ limit: 100 }) as any;
   const outboundQ = useEmails({ limit: 100 }) as any;
   const syncRunsQ = useSystemSyncRuns({ limit: 100 }) as any;
-  const rawSourcesQ = useRawContextSources({
+  const sourceRecordsQ = useSourceProcessingRecords({
     q: query.trim() || undefined,
     status: rawStatusFilter(statusFilter),
     limit: 100,
@@ -284,7 +284,7 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
   const activities: any[] = activitiesQ.data?.data ?? [];
   const outboundEmails: any[] = outboundQ.data?.data ?? [];
   const syncRuns: any[] = syncRunsQ.data?.data ?? [];
-  const rawSources: any[] = rawSourcesQ.data?.data ?? [];
+  const sourceRecords: any[] = sourceRecordsQ.data?.data ?? [];
   const memoryEntries: any[] = memoryQ.data?.data ?? [];
   const signalEntries: any[] = signalsQ.data?.data ?? [];
   const staleEntries: any[] = staleQ.data?.data ?? [];
@@ -307,7 +307,7 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
   }, [memoryEntries, signalEntries]);
 
   const rows = useMemo(() => {
-    const rawSourceRows = rawSources.slice(0, 50).map(source => {
+    const sourceRows = sourceRecords.slice(0, 50).map(source => {
       const classified = classifyRawSource(source.source_type);
       const status = statusFromRawSource(source.status);
       const memory = Number(source.memory_created ?? 0);
@@ -318,17 +318,17 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
         ?? 'Processing source context';
       const provenance = provenanceLabel(source.metadata);
       return {
-        id: `raw-source-${source.id}`,
+        id: `source-${source.id}`,
         source: classified.source,
         type: classified.type,
-        title: source.source_label ?? source.source_ref ?? 'Raw context source',
+        title: source.source_label ?? source.source_ref ?? 'Source',
         detail: [
           provenance,
           source.failure_reason ? `${counts}; ${source.failure_reason}` : counts,
         ].filter(Boolean).join(' · '),
         timestamp: source.processed_at ?? source.created_at,
         status,
-        href: `/context?tab=lineage&raw_context_source_id=${source.id}`,
+        href: `/context?tab=lineage&source_id=${source.id}`,
         actionLabel: ['Failed', 'No context found'].includes(status) ? 'Retry' : undefined,
         actionDisabled: reprocessSource.isPending,
         onAction: ['Failed', 'No context found'].includes(status)
@@ -343,7 +343,7 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
           : undefined,
       };
     });
-    const rawSourceRefs = new Set(rawSources.map(source => String(source.source_ref)));
+    const sourceRefs = new Set(sourceRecords.map(source => String(source.source_ref)));
 
     const activityRows = activities.slice(0, 30).map(activity => {
       const subject = String(activity.subject ?? '').toLowerCase();
@@ -369,7 +369,7 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
         status,
         onClick: () => openDrawer('activity', activity.id),
       };
-    }).filter(row => !rawSourceRefs.has(row.id.replace(/^activity-/, '')));
+    }).filter(row => !sourceRefs.has(row.id.replace(/^activity-/, '')));
 
     const outboundRows = outboundEmails.slice(0, 20).map(email => {
       const rawStatus = String(email.status ?? '').toLowerCase();
@@ -434,10 +434,10 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
         };
       });
 
-    return [...rawSourceRows, ...activityRows, ...outboundRows, ...syncRows, ...contextRows]
+    return [...sourceRows, ...activityRows, ...outboundRows, ...syncRows, ...contextRows]
       .sort((a, b) => new Date(b.timestamp ?? 0).getTime() - new Date(a.timestamp ?? 0).getTime())
       .slice(0, 20);
-  }, [activities, contextByActivity, memoryEntries, openDrawer, outboundEmails, rawSources, reprocessSource, signalEntries, syncRuns]);
+  }, [activities, contextByActivity, memoryEntries, openDrawer, outboundEmails, sourceRecords, reprocessSource, signalEntries, syncRuns]);
 
   const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -474,7 +474,7 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
   }, [rows]);
 
   const signalReviewTotal = Number(signalGroupsQ.data?.total ?? 0);
-  const isLoading = activitiesQ.isLoading || outboundQ.isLoading || rawSourcesQ.isLoading || memoryQ.isLoading || signalsQ.isLoading || signalGroupsQ.isLoading;
+  const isLoading = activitiesQ.isLoading || outboundQ.isLoading || sourceRecordsQ.isLoading || memoryQ.isLoading || signalsQ.isLoading || signalGroupsQ.isLoading;
   const hasFilters = sourceFilter !== 'all' || statusFilter !== 'all' || query.trim().length > 0;
   useSlashSearchFocus(searchRef);
 

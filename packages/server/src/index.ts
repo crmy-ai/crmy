@@ -709,7 +709,7 @@ export async function createApp(config: ServerConfig) {
         await runBackgroundTask('agent_session_cleanup', () => cleanExpiredSessions(db), failures);
         await runBackgroundTask('agent_turns', () => processPendingAgentTurns(db), failures);
         await runBackgroundTask('context_pending_extractions', () => processPendingExtractions(db), failures);
-        await runBackgroundTask('raw_context_sources', () => processPendingRawContextSources(db), failures);
+        await runBackgroundTask('sources', () => processPendingRawContextSources(db), failures);
         await runBackgroundTask('context_stale_entries', () => processStaleEntries(db), failures);
         // Product knowledge (optional): age out stale claims, then open review assignments for owned claims needing attention.
         await runBackgroundTask('knowledge_freshness_sweep', () => sweepKnowledgeFreshness(db), failures);
@@ -993,7 +993,7 @@ export { describeTool, zodToJsonSchema } from './mcp/tool-describe.js';
 export { emitEvent } from './events/emitter.js';
 export { createWorkflowEngine } from './workflows/engine.js';
 export { getSampleDataStatus, resetSampleData, seedSampleData } from './services/sample-data.js';
-export { retrieveKnowledge, isProductKnowledgeConfigured, selectClaims, upsertProductKnowledgeClaim, buildProductContext, getProductContextForSubject } from './services/knowledge-retrieval.js';
+export { retrieveKnowledge, isKnowledgeConfigured, selectClaims, upsertGovernedKnowledgeClaim, buildKnowledgeContext, getKnowledgeContextForSubject } from './services/knowledge-retrieval.js';
 export { sweepKnowledgeFreshness, sweepTenantKnowledgeFreshness, computeStaleClaimIds, freshnessWindowDays } from './services/knowledge-freshness.js';
 export {
   listKnowledgeClaimsForReview, reviewKnowledgeClaim, reviewDecisionToPatch,

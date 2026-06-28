@@ -17,7 +17,7 @@ import type {
   ContextEvidence,
   ActionContextReadinessStatus,
   ActionContextRiskLevel,
-  ProductContext,
+  KnowledgeContext,
   ActionContextSourceAuthoritySummary,
   ActorContext,
   Briefing,
@@ -27,6 +27,7 @@ import type {
   SubjectType,
   UUID,
 } from '@crmy/shared';
+import { ACTION_CONTEXT_PACKET_VERSION } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
 import { actorHasScope } from '../auth/scopes.js';
 import * as sorRepo from '../db/repos/systems-of-record.js';
@@ -116,16 +117,16 @@ function actionPolicySummary(policy: ReturnType<typeof evaluateActionPolicy>): A
 }
 
 /**
- * Build the informational product_knowledge check from briefing product context.
- * Status is always 'ready' — product knowledge is optional and must never block
+ * Build the informational knowledge check from briefing Trusted Facts.
+ * Status is always 'ready' because Trusted Facts are optional and must never block
  * or downgrade an action's operating mode; the detail lives in counts and reasons.
  */
-function buildProductKnowledgeCheck(pc: ProductContext): NonNullable<ActionContext['checks']['product_knowledge']> {
+function buildKnowledgeCheck(pc: KnowledgeContext): NonNullable<ActionContext['checks']['knowledge']> {
   const countReason = (reason: string) => pc.avoid_claims.filter(item => item.reason === reason).length;
   const reasons: string[] = [];
-  if (pc.status === 'not_configured') reasons.push('Product knowledge is not configured.');
-  else if (pc.status === 'degraded') reasons.push('Product knowledge retrieval was degraded.');
-  else if (pc.status === 'no_results') reasons.push('No approved knowledge claims matched this subject.');
+  if (pc.status === 'not_configured') reasons.push('Trusted Facts are not configured.');
+  else if (pc.status === 'degraded') reasons.push('Trusted Fact retrieval was degraded.');
+  else if (pc.status === 'no_results') reasons.push('No Trusted Facts matched this subject.');
   return {
     status: 'ready',
     reasons,
@@ -849,6 +850,7 @@ function buildActionPacket(
   ]);
 
   return {
+    version: ACTION_CONTEXT_PACKET_VERSION,
     action_type: proposedAction?.action_type,
     objective: proposedActionLabel(proposedAction),
     status: context.readiness.status,
@@ -1104,7 +1106,7 @@ export async function getActionContext(
     token_budget_profile: input.token_budget_profile,
     evidence_mode: input.evidence_mode,
     proposed_action_type: input.proposed_action?.action_type,
-    include_product_context: input.include_product_context,
+    include_knowledge: input.include_knowledge,
     actor_id: actor.actor_id,
   });
 
@@ -1165,15 +1167,15 @@ export async function getActionContext(
     'audit_event',
   ];
 
-  // Product knowledge check + proof — informational, derived from the briefing's
-  // product_context (populated when product knowledge is configured). Added after
+  // Trusted Fact check + proof. Informational, derived from the briefing's
+  // knowledge (populated when Trusted Facts are configured). Added after
   // readiness derivation so it never changes the operating mode.
-  const productContext = briefing.product_context;
-  const productKnowledgeCheck = productContext ? buildProductKnowledgeCheck(productContext) : undefined;
-  const usedKnowledgeClaimIds = productContext ? productContext.relevant_claims.map(claim => claim.id) : [];
-  const knowledgeReceiptIds = productContext?.retrieval_receipt_id ? [productContext.retrieval_receipt_id] : [];
-  const checks = productKnowledgeCheck
-    ? { ...derived.checks, product_knowledge: productKnowledgeCheck }
+  const knowledgeContext = briefing.knowledge;
+  const knowledgeCheck = knowledgeContext ? buildKnowledgeCheck(knowledgeContext) : undefined;
+  const usedKnowledgeSnippetIds = knowledgeContext ? knowledgeContext.relevant_claims.map(claim => claim.id) : [];
+  const knowledgeReceiptIds = knowledgeContext?.retrieval_receipt_id ? [knowledgeContext.retrieval_receipt_id] : [];
+  const checks = knowledgeCheck
+    ? { ...derived.checks, knowledge: knowledgeCheck }
     : derived.checks;
 
   const actionContext: ActionContext = {
@@ -1193,7 +1195,7 @@ export async function getActionContext(
       proof: {
         used_context_entry_ids: usedContextEntryIds,
         used_signal_group_ids: usedSignalGroupIds,
-        ...(usedKnowledgeClaimIds.length ? { used_knowledge_claim_ids: usedKnowledgeClaimIds } : {}),
+        ...(usedKnowledgeSnippetIds.length ? { used_knowledge_snippet_ids: usedKnowledgeSnippetIds } : {}),
         ...(knowledgeReceiptIds.length ? { knowledge_retrieval_receipt_ids: knowledgeReceiptIds } : {}),
         expected_receipts: unique(expectedReceipts),
       },
@@ -1206,7 +1208,7 @@ export async function getActionContext(
     proof: {
       used_context_entry_ids: usedContextEntryIds,
       used_signal_group_ids: usedSignalGroupIds,
-      ...(usedKnowledgeClaimIds.length ? { used_knowledge_claim_ids: usedKnowledgeClaimIds } : {}),
+      ...(usedKnowledgeSnippetIds.length ? { used_knowledge_snippet_ids: usedKnowledgeSnippetIds } : {}),
       ...(knowledgeReceiptIds.length ? { knowledge_retrieval_receipt_ids: knowledgeReceiptIds } : {}),
       expected_receipts: unique(expectedReceipts),
     },

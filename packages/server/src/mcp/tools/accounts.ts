@@ -514,7 +514,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_merge',
       tier: 'admin',
-      description: 'Merge a duplicate account (secondary) into a primary account. Admin/owner only. All contacts, opportunities, use cases, activities, account-scoped context, email/calendar records, assignments, signal groups, and Raw Context receipts linked to the secondary are reassigned to the primary. The secondary account is soft-deleted (merged_into set to primary_id). The primary retains its profile fields; the secondary domain, additional domains, name, and aliases are preserved on the primary as aliases/additional domains.',
+      description: 'Merge a duplicate account (secondary) into a primary account. Admin/owner only. All contacts, opportunities, use cases, activities, account-scoped context, email/calendar records, assignments, signal groups, and Source receipts linked to the secondary are reassigned to the primary. The secondary account is soft-deleted (merged_into set to primary_id). The primary retains its profile fields; the secondary domain, additional domains, name, and aliases are preserved on the primary as aliases/additional domains.',
       inputSchema: z.object({
         primary_id: z.string().uuid().describe('The account to keep — its profile fields are preserved'),
         secondary_id: z.string().uuid().describe('The duplicate account to absorb — will be soft-deleted after merge'),
@@ -599,7 +599,7 @@ export function accountTools(db: DbPool): ToolDef[] {
             activity_subjects: activitySubjects.rowCount ?? 0,
             context_entries: contextEntries.rowCount ?? 0,
             assignments: assignments.rowCount ?? 0,
-            raw_context_sources: rawSources.rowCount ?? 0,
+            sources: rawSources.rowCount ?? 0,
             signal_groups: signalGroups.rowCount ?? 0,
             email_messages: emailMessages.rowCount ?? 0,
             outbound_emails: emails.rowCount ?? 0,

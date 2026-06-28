@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import crypto from 'node:crypto';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type {
@@ -22,7 +24,7 @@ import type { DbPool } from '../db/pool.js';
 import * as sourceRepo from '../db/repos/knowledge-source-connections.js';
 import { getKnowledgeClaimByExternalKey } from '../db/repos/knowledge-claims.js';
 import { decryptSecret } from '../lib/secrets.js';
-import { upsertProductKnowledgeClaim, type UpsertProductKnowledgeClaimInput } from './knowledge-retrieval.js';
+import { upsertGovernedKnowledgeClaim, type UpsertGovernedKnowledgeClaimInput } from './knowledge-retrieval.js';
 
 type Json = Record<string, unknown>;
 type RemoteClaim = Record<string, unknown>;
@@ -81,7 +83,70 @@ function normalizeEndpointUrl(raw: string): string {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw validationError('Only HTTP and HTTPS MCP endpoints are supported.');
   }
+  assertHostnameAllowed(url.hostname);
   return url.toString();
+}
+
+function privateMcpConnectorsAllowed(): boolean {
+  return process.env.CRMY_ALLOW_PRIVATE_MCP_CONNECTORS === 'true';
+}
+
+function normalizeHostname(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, '').toLowerCase();
+}
+
+function assertHostnameAllowed(hostname: string): void {
+  if (privateMcpConnectorsAllowed()) return;
+  const normalized = normalizeHostname(hostname);
+  if (normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local')) {
+    throw validationError('MCP connector endpoints cannot target local hostnames unless CRMY_ALLOW_PRIVATE_MCP_CONNECTORS=true.');
+  }
+  if (net.isIP(normalized) && isPrivateAddress(normalized)) {
+    throw validationError('MCP connector endpoints cannot target private, loopback, or link-local addresses unless CRMY_ALLOW_PRIVATE_MCP_CONNECTORS=true.');
+  }
+}
+
+function isPrivateAddress(address: string): boolean {
+  const ipv4 = address.startsWith('::ffff:') ? address.slice(7) : address;
+  if (net.isIPv4(ipv4)) {
+    const parts = ipv4.split('.').map(part => Number(part));
+    const [a, b] = parts;
+    return a === 0
+      || a === 10
+      || a === 127
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168)
+      || (a === 198 && (b === 18 || b === 19));
+  }
+  const normalized = address.toLowerCase();
+  return normalized === '::1'
+    || normalized === '::'
+    || normalized.startsWith('fc')
+    || normalized.startsWith('fd')
+    || normalized.startsWith('fe8')
+    || normalized.startsWith('fe9')
+    || normalized.startsWith('fea')
+    || normalized.startsWith('feb');
+}
+
+async function assertEndpointNetworkAllowed(endpoint: string): Promise<void> {
+  if (privateMcpConnectorsAllowed()) return;
+  const url = new URL(endpoint);
+  assertHostnameAllowed(url.hostname);
+  const hostname = normalizeHostname(url.hostname);
+  if (net.isIP(hostname)) return;
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = await dns.lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    return;
+  }
+  const blocked = addresses.find(address => isPrivateAddress(address.address));
+  if (blocked) {
+    throw validationError('MCP connector endpoints cannot resolve to private, loopback, or link-local addresses unless CRMY_ALLOW_PRIVATE_MCP_CONNECTORS=true.');
+  }
 }
 
 function configFromInput(input: Pick<KnowledgeSourceConnectionInput, 'endpoint_url' | 'description'>): Json {
@@ -139,6 +204,7 @@ async function withMcpClient<T>(
   const credentials = decryptSecret<Json>(connection.credentials_enc);
   const headers = credentialHeaders(connection.auth_type, credentials);
   const endpoint = endpointFromConnection(connection);
+  await assertEndpointNetworkAllowed(endpoint);
 
   return withTimeout('MCP knowledge connector request', async (signal) => {
     const client = new Client({ name: 'crmy-knowledge-source-connector', version: '1.0.0' }, { capabilities: {} });
@@ -211,7 +277,7 @@ async function fetchRemoteClaims(connection: sourceRepo.KnowledgeSourceConnectio
 }
 
 function normalizeClaim(connection: sourceRepo.KnowledgeSourceConnectionRow, remote: RemoteClaim): {
-  input: UpsertProductKnowledgeClaimInput;
+  input: UpsertGovernedKnowledgeClaimInput;
   sourceHash: string;
 } | null {
   const title = stringValue(remote.title);
@@ -277,9 +343,9 @@ function normalizeClaim(connection: sourceRepo.KnowledgeSourceConnectionRow, rem
 async function applyLocalGovernanceDefaults(
   db: DbPool,
   tenantId: UUID,
-  input: UpsertProductKnowledgeClaimInput,
+  input: UpsertGovernedKnowledgeClaimInput,
   sourceHash: string,
-): Promise<UpsertProductKnowledgeClaimInput> {
+): Promise<UpsertGovernedKnowledgeClaimInput> {
   const existing = input.external_key
     ? await getKnowledgeClaimByExternalKey(db, tenantId, input.external_key)
     : null;
@@ -440,7 +506,7 @@ export async function syncKnowledgeSourceConnection(
             imported_at: importedAt,
           },
         }, normalized.sourceHash);
-        await upsertProductKnowledgeClaim(db, actor, governedInput);
+        await upsertGovernedKnowledgeClaim(db, actor, governedInput);
         imported += 1;
       } catch {
         failed += 1;
@@ -451,7 +517,7 @@ export async function syncKnowledgeSourceConnection(
     await sourceRepo.updateConnection(db, actor.tenant_id, id, {
       status: failed > 0 && imported === 0 ? 'error' : 'configured',
       last_sync_at: importedAt,
-      last_error: failed > 0 ? `${failed} remote claim(s) could not be imported.` : null,
+      last_error: failed > 0 ? `${failed} remote fact(s) could not be imported.` : null,
       sync_stats: result,
     });
     return result;

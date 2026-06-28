@@ -64,16 +64,16 @@ const DATA_QUALITY_COPY: Record<string, { label: string; description: string }> 
     label: 'Stuck context indexing work',
     description: 'Context indexing jobs have been processing too long and may need operator review.',
   },
-  stale_raw_context_sources_processing: {
-    label: 'Stale Raw Context processing',
-    description: 'Raw Context receipts are stuck mid-processing and may need retry or review.',
+  stale_sources_processing: {
+    label: 'Stale Source processing',
+    description: 'Source receipts are stuck mid-processing and may need retry or review.',
   },
-  failed_raw_context_sources_retryable: {
-    label: 'Retryable Raw Context failures',
-    description: 'Raw Context extraction failed in a way that may succeed after retrying.',
+  failed_sources_retryable: {
+    label: 'Retryable Source failures',
+    description: 'Source extraction failed in a way that may succeed after retrying.',
   },
-  failed_raw_context_extraction_attempts: {
-    label: 'Failed Raw Context extraction attempts',
+  failed_source_extraction_attempts: {
+    label: 'Failed Source extraction attempts',
     description: 'Recent extraction attempts failed during model, parsing, repair, or write processing.',
   },
   stuck_agent_turns_running: {
@@ -113,8 +113,8 @@ const REPAIRABLE_DATA_QUALITY_CHECKS = new Set([
   'activities_missing_canonical_subject',
   'current_context_missing_search_index',
   'stuck_context_outbox_processing',
-  'stale_raw_context_sources_processing',
-  'failed_raw_context_sources_retryable',
+  'stale_sources_processing',
+  'failed_sources_retryable',
   'stuck_agent_turns_running',
 ]);
 
@@ -285,7 +285,7 @@ function RawContextReliabilityNote() {
   return (
     <details className="rounded-xl border border-border bg-card px-4 py-3">
       <summary className="cursor-pointer text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground">
-        Raw Context replay and dedupe
+        Source replay and dedupe
       </summary>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">
         Re-sending the same source returns the existing receipt instead of extracting again. When a source includes the real event time,
@@ -634,9 +634,9 @@ export default function OperationsPage() {
     return sum + (count > 0 ? count : check.error ? 1 : 0);
   }, 0);
   const schedulerHasAttention = schedulerNeedsAttention(schedulerHealth);
-  const rawContextHasFindings = dataQualityFindings.some(check => {
+  const sourceHasFindings = dataQualityFindings.some(check => {
     const key = getDataQualityKey(check);
-    return key.includes('raw_context') || key.includes('extraction');
+    return key.includes('source') || key.includes('extraction');
   });
   const attentionItems = useMemo(() => {
     const queueItems = attentionQueues.map(queue => {
@@ -802,7 +802,7 @@ export default function OperationsPage() {
                     {visibleQueues.map(queue => <QueueCard key={queue.name} queue={queue} />)}
                   </div>
                 )}
-                {(showAll || rawContextHasFindings) && (
+                {(showAll || sourceHasFindings) && (
                   <div className="mt-3">
                     <RawContextReliabilityNote />
                   </div>

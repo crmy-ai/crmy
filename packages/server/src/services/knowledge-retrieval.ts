@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Governed Product Knowledge Retrieval — shared backend service.
+ * Governed Knowledge Retrieval — shared backend service.
  *
  * The single internal boundary every surface calls (MCP tool, REST, CLI,
- * Workspace Agent, briefing/Action Context enrichment), so product knowledge
- * never depends on local MCP or a particular client.
+ * Workspace Agent, briefing/Action Context enrichment), so Trusted Facts
+ * never depend on local MCP or a particular client.
  *
  * Architecture: a pure decision core (`selectClaims`: policy → grounding →
  * rank → pack) over candidate rows fetched by a thin repo. The pure core is
@@ -26,7 +26,7 @@ import type {
   KnowledgeExcludedClaim,
   KnowledgeRetrievalRequest,
   KnowledgeRetrievalResult,
-  ProductContext,
+  KnowledgeContext,
 } from '@crmy/shared';
 import { isSnippetGrounded } from '../agent/extraction-grounding.js';
 import {
@@ -40,9 +40,9 @@ import {
 import { insertKnowledgeReceipt } from '../db/repos/knowledge-receipts.js';
 
 const NOT_CONFIGURED_MESSAGE =
-  'Knowledge claim retrieval is not configured for this workspace. '
+  'Trusted Facts are not configured for this workspace. '
   + 'Customer Memory, briefings, and Action Context work without it. '
-  + 'Configure approved company, product, or competitor claims to enable grounded, cited retrieval.';
+  + 'Configure approved company, product, or competitor facts to enable grounded, cited retrieval.';
 
 const PRIORITY_WEIGHT: Record<KnowledgeClaimRow['source_priority'], number> = {
   authoritative: 3,
@@ -51,11 +51,11 @@ const PRIORITY_WEIGHT: Record<KnowledgeClaimRow['source_priority'], number> = {
 };
 
 /**
- * Whether product knowledge is configured for a tenant (any usable claim exists).
+ * Whether Trusted Facts are configured for a tenant (any usable fact exists).
  * Resilient: any error (missing table, fake DB in tests) is treated as
  * not-configured so briefing/Action Context enrichment stays strictly additive.
  */
-export async function isProductKnowledgeConfigured(db: DbPool, tenantId: string): Promise<boolean> {
+export async function isKnowledgeConfigured(db: DbPool, tenantId: string): Promise<boolean> {
   try {
     return (await countKnowledgeClaims(db, tenantId)) > 0;
   } catch {
@@ -73,8 +73,8 @@ function dedupeCitations(citations: KnowledgeCitation[]): KnowledgeCitation[] {
   return out;
 }
 
-/** Package a retrieval result as briefing/Action-Context product context (pure). */
-export function buildProductContext(result: KnowledgeRetrievalResult): ProductContext {
+/** Package a retrieval result as briefing/Action-Context knowledge context (pure). */
+export function buildKnowledgeContext(result: KnowledgeRetrievalResult): KnowledgeContext {
   const matches = (claim: KnowledgeClaim, re: RegExp) => re.test(claim.category);
   return {
     status: result.status,
@@ -89,13 +89,13 @@ export function buildProductContext(result: KnowledgeRetrievalResult): ProductCo
   };
 }
 
-/** Retrieve and package product context for a subject (used by briefing enrichment). */
-export async function getProductContextForSubject(
+/** Retrieve and package Trusted Facts for a subject (used by briefing enrichment). */
+export async function getKnowledgeContextForSubject(
   db: DbPool,
   actor: ActorContext,
   input: KnowledgeRetrievalRequest,
-): Promise<ProductContext> {
-  return buildProductContext(await retrieveKnowledge(db, actor, input));
+): Promise<KnowledgeContext> {
+  return buildKnowledgeContext(await retrieveKnowledge(db, actor, input));
 }
 
 function policyName(audience: KnowledgeAudience): string {
@@ -198,8 +198,8 @@ export function selectClaims(
 }
 
 /**
- * Retrieve governed product knowledge for a customer action. Returns approved,
- * grounded, cited claims with trust metadata — or a clear non-`available`
+ * Retrieve Trusted Facts for a customer action. Returns approved,
+ * grounded, cited facts with trust metadata or a clear non-`available`
  * status. Records a retrieval receipt for proof/lineage.
  */
 export async function retrieveKnowledge(
@@ -207,7 +207,7 @@ export async function retrieveKnowledge(
   actor: ActorContext,
   input: KnowledgeRetrievalRequest,
 ): Promise<KnowledgeRetrievalResult> {
-  if (!(await isProductKnowledgeConfigured(db, actor.tenant_id))) {
+  if (!(await isKnowledgeConfigured(db, actor.tenant_id))) {
     return { status: 'not_configured', claims: [], excluded_claims: [], warnings: [], message: NOT_CONFIGURED_MESSAGE };
   }
 
@@ -251,33 +251,33 @@ export async function retrieveKnowledge(
       retrieval_receipt: { id: receipt.id, policy: receipt.policy, retrieved_at: receipt.retrieved_at },
     };
   } catch (err) {
-    // Degraded, not failed: callers that do not require product context continue.
+    // Degraded, not failed: callers that do not require Trusted Facts continue.
     return {
       status: 'degraded',
       claims: [],
       excluded_claims: [],
-      warnings: [`Product knowledge retrieval is temporarily degraded: ${err instanceof Error ? err.message : 'unknown error'}`],
-      message: 'Product knowledge retrieval is temporarily unavailable. Proceeding without it.',
+      warnings: [`Trusted Fact retrieval is temporarily degraded: ${err instanceof Error ? err.message : 'unknown error'}`],
+      message: 'Knowledge retrieval is temporarily unavailable. Proceeding without it.',
     };
   }
 }
 
-export interface UpsertProductKnowledgeClaimInput extends Omit<UpsertKnowledgeClaimInput, 'grounded'> {
-  /** Source text the claim is drawn from; when present, grounding is verified against it. */
+export interface UpsertGovernedKnowledgeClaimInput extends Omit<UpsertKnowledgeClaimInput, 'grounded'> {
+  /** Source text the fact is drawn from; when present, grounding is verified against it. */
   source_text?: string;
   /** Explicit grounding flag, used only when no source_text is supplied. */
   grounded?: boolean;
 }
 
 /**
- * Admin/governance write path for a claim envelope. When `source_text` is
+ * Admin/governance write path for a Trusted Fact. When `source_text` is
  * supplied, grounding is verified against it (reusing the auto-promotion
  * grounding gate) so customer-facing eligibility cannot be self-asserted.
  */
-export async function upsertProductKnowledgeClaim(
+export async function upsertGovernedKnowledgeClaim(
   db: DbPool,
   actor: ActorContext,
-  input: UpsertProductKnowledgeClaimInput,
+  input: UpsertGovernedKnowledgeClaimInput,
 ): Promise<KnowledgeClaim> {
   const { source_text, grounded: explicitGrounded, ...rest } = input;
   const grounded = source_text

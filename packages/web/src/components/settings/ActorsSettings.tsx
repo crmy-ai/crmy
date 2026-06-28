@@ -83,7 +83,7 @@ function connectionSummaryLine(summary?: ActorConnectionSummary): string | null 
   const parts: string[] = [];
   if (email) parts.push(`Email: ${email}`);
   if (processed > 0) parts.push(`${processed.toLocaleString()} processed`);
-  if ((summary.raw_context_source_count ?? 0) > 0) parts.push(`${summary.raw_context_source_count?.toLocaleString()} Raw Context`);
+  if ((summary.source_count ?? 0) > 0) parts.push(`${summary.source_count?.toLocaleString()} Sources`);
   if ((summary.signal_count ?? 0) > 0) parts.push(`${summary.signal_count?.toLocaleString()} Signals`);
   if ((summary.memory_count ?? 0) > 0) parts.push(`${summary.memory_count?.toLocaleString()} Memory`);
   return parts.length ? parts.join(' · ') : null;
@@ -195,7 +195,7 @@ function ConnectionRecordList({
             const issue = connectionText(record.last_error);
             const total = kind === 'mailbox' ? connectionNumber(record.total_messages) : connectionNumber(record.total_events);
             const processed = kind === 'mailbox' ? connectionNumber(record.processed_messages) : connectionNumber(record.processed_events);
-            const rawContext = connectionNumber(record.raw_context_sources);
+            const sources = connectionNumber(record.sources);
             const signals = connectionNumber(record.signals_created);
             const memory = connectionNumber(record.memory_created);
             const lastSource = kind === 'mailbox' ? record.last_message_at : record.last_event_at;
@@ -216,7 +216,7 @@ function ConnectionRecordList({
                       {connectionText(lastSource) ? ` · Latest ${kind === 'mailbox' ? 'message' : 'event'} ${connectionDate(lastSource)}` : ''}
                     </p>
                     <p className="mt-1 text-muted-foreground">
-                      {compactCount(total, kind === 'mailbox' ? 'message' : 'event')} seen · {compactCount(processed, 'processed')} · {compactCount(rawContext, 'Raw Context source')} · {compactCount(signals, 'Signal')} · {compactCount(memory, 'Memory entry', 'Memory entries')}
+                      {compactCount(total, kind === 'mailbox' ? 'message' : 'event')} seen · {compactCount(processed, 'processed')} · {compactCount(sources, 'Source')} · {compactCount(signals, 'Signal')} · {compactCount(memory, 'Memory entry', 'Memory entries')}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-1.5">
@@ -402,6 +402,7 @@ const SCOPE_GROUPS = [
   { label: 'Admin Setup', scopes: [
     { value: 'api_keys:admin', label: 'Manage API keys' },
     { value: 'email_provider:admin', label: 'Manage shared email provider' },
+    { value: 'agent:admin', label: 'Manage agent settings' },
   ]},
   { label: 'Workflows / Messaging', scopes: [
     { value: 'workflows:read', label: 'Read workflows' },

@@ -335,7 +335,7 @@ export function emailTools(db: DbPool): ToolDef[] {
     {
       name: 'email_message_process',
       tier: 'extended',
-      description: 'Process an existing customer email message as Raw Context. Internal or automated emails are skipped unless reclassified first.',
+      description: 'Process an existing customer email message as a Source. Internal or automated emails are skipped unless reclassified first.',
       inputSchema: z.object({ id: z.string().uuid(), idempotency_key: z.string().max(128).optional() }),
       handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
         return runToolOperation(db, actor, 'email_message_process', input, async () => {
@@ -374,7 +374,7 @@ export function emailTools(db: DbPool): ToolDef[] {
     {
       name: 'email_message_link',
       tier: 'extended',
-      description: 'Link an unmatched customer email to visible customer records and optionally process it as Raw Context. Use this when matching was ambiguous or the email arrived before CRMy could identify the account/contact.',
+      description: 'Link an unmatched customer email to visible customer records and optionally process it as a Source. Use this when matching was ambiguous or the email arrived before CRMy could identify the account/contact.',
       inputSchema: z.object({
         id: z.string().uuid(),
         classification: z.enum(['customer', 'mixed', 'internal', 'automated', 'unknown']).optional(),
@@ -409,7 +409,7 @@ export function emailTools(db: DbPool): ToolDef[] {
               : 'unprocessed',
             processing_reason: input.classification && ['internal', 'automated'].includes(input.classification)
               ? 'Marked as non-customer email.'
-              : 'Customer record link updated. Ready to process as Raw Context.',
+              : 'Customer record link updated. Ready to process as a Source.',
             metadata: { link_updated_by: actor.actor_id, link_updated_at: new Date().toISOString() },
           };
           if (input.classification !== undefined) patch.classification = input.classification;
@@ -581,7 +581,7 @@ export function emailTools(db: DbPool): ToolDef[] {
         return {
           email_message_id: result.message.id,
           activity_id: result.activity_id ?? null,
-          raw_context_source_id: result.raw_context_source_id ?? null,
+          source_id: result.source_id ?? null,
           contact_id: result.message.contact_id ?? null,
           account_id: result.message.account_id ?? null,
           classification: result.classification,

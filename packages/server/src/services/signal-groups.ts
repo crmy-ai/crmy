@@ -20,24 +20,12 @@ import { callLLM } from '../agent/providers/llm.js';
 import { ensureEmbeddingBestEffort } from './embedding-service.js';
 import { retrieveSignalGroupCandidates } from './context-candidate-retriever.js';
 import { deriveSignalReadiness, signalReadinessForGroup } from './signal-readiness.js';
-
-const SENSITIVE_CONTEXT_TYPES = new Set([
-  'stakeholder',
-  'stakeholder_role',
-  'stakeholder_map',
-  'risk',
-  'deal_risk',
-  'forecast',
-  'forecast_risk',
-  'forecast_signal',
-  'commitment',
-  'next_step',
-  'methodology_gap',
-  'buying_process',
-  'success_criteria',
-  'buyer_role',
-  'approval',
-]);
+import {
+  defaultMemoryReviewDate,
+  groundingMethodForPromotion,
+  memoryClaimTier,
+  promotionPolicyLabel,
+} from './memory-trust.js';
 
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have',
@@ -384,7 +372,7 @@ function groupStatus(input: {
   supportCount: number;
   independentSourceCount: number;
   conflictCount: number;
-  sensitive: boolean;
+  claimTier: 0 | 1 | 2;
   convergenceBlocked: boolean;
   readinessBlocked: boolean;
 }): { status: signalGroupRepo.SignalGroupStatus; blockedReason?: string } {
@@ -392,8 +380,8 @@ function groupStatus(input: {
   if (input.convergenceBlocked) return { status: 'blocked', blockedReason: 'Similar or conflicting Memory already exists.' };
   if (input.readinessBlocked) return { status: 'blocked', blockedReason: 'Needs more detail before agents can rely on it as Memory.' };
   if (input.confidence < input.threshold) return { status: 'gathering', blockedReason: 'Waiting for stronger evidence.' };
-  if (input.sensitive && input.independentSourceCount < 2) {
-    return { status: 'blocked', blockedReason: 'Sensitive context needs corroboration or approval before becoming Memory.' };
+  if (input.claimTier === 2 && input.independentSourceCount < 2) {
+    return { status: 'blocked', blockedReason: 'High-impact context needs human approval or independent corroboration before becoming Memory.' };
   }
   return { status: 'ready' };
 }
@@ -442,14 +430,15 @@ async function recomputeGroup(
       structured_data: latest.structured_data,
     })
     : { should_block: false };
-  const sensitive = SENSITIVE_CONTEXT_TYPES.has(group.context_type);
+  const claimTier = memoryClaimTier(group.context_type);
+  const highImpact = claimTier === 2;
   const state = groupStatus({
     confidence,
     threshold,
     supportCount: supporting.length,
     independentSourceCount: independentSources,
     conflictCount,
-    sensitive,
+    claimTier,
     convergenceBlocked: Boolean(convergence.should_block),
     readinessBlocked: readinessBlockers.length > 0,
   });
@@ -459,7 +448,7 @@ async function recomputeGroup(
     ...(Boolean(convergence.should_block) ? ['Similar or conflicting Memory already exists.'] : []),
     ...Array.from(new Set(readinessBlockers)),
     ...(confidence < threshold ? [`Readiness score is ${Math.round(confidence * 100)}%, below the ${Math.round(threshold * 100)}% confirmation threshold.`] : []),
-    ...(sensitive && independentSources < 2 ? ['Sensitive context needs corroboration or approval before becoming Memory.'] : []),
+    ...(highImpact && independentSources < 2 ? ['High-impact context needs human approval or independent corroboration before becoming Memory.'] : []),
   ];
   const readiness = deriveSignalReadiness({
     group_status: state.status,
@@ -475,8 +464,8 @@ async function recomputeGroup(
     source_boost: components.source_boost,
     conflict_penalty: components.conflict_penalty,
     typed_completeness: typedCompleteness,
-    sensitive,
-    requires_approval: sensitive && independentSources < 2,
+    sensitive: highImpact,
+    requires_approval: highImpact && independentSources < 2,
     convergence_blocked: Boolean(convergence.should_block),
     readiness_blockers: readinessBlockers,
     missing_details: missingDetails,
@@ -493,7 +482,10 @@ async function recomputeGroup(
     latest_signal_id: latest?.id ?? null,
     blocked_reason: state.blockedReason,
     metadata: {
-      sensitive,
+      sensitive: highImpact,
+      high_impact: highImpact,
+      claim_tier: claimTier,
+      promotion_policy: promotionPolicyLabel(group.context_type),
       threshold,
       trust_score: confidence,
       confidence_components: components,
@@ -509,7 +501,7 @@ async function recomputeGroup(
       promotion_reason: promotionBlockers.length === 0
         ? 'This Signal has enough evidence, source independence, and confidence to become confirmed Memory.'
         : 'This Signal needs review or more support before confirmation.',
-      requires_corroboration: sensitive && independentSources < 2,
+      requires_corroboration: highImpact && independentSources < 2,
       can_promote_manually: conflictCount === 0 && !Boolean(convergence.should_block),
       suggested_action: (convergence as { suggested_action?: string }).suggested_action,
     },
@@ -558,11 +550,22 @@ async function promoteReadyGroup(
   const promoted = await contextRepo.promoteSignal(db, tenantId as UUID, candidate.id, actorId as UUID, {
     confidence: group.aggregate_confidence,
     evidence,
+    grounding_method: groundingMethodForPromotion({
+      humanReviewed: approved,
+      independentSourceCount: group.independent_source_count,
+    }),
+    valid_until: candidate.valid_until ?? defaultMemoryReviewDate(candidate.context_type),
     structured_data: {
       ...candidate.structured_data,
       signal_group_id: group.id,
       signal_group_support_count: group.support_count,
       signal_group_independent_sources: group.independent_source_count,
+      grounding_method: groundingMethodForPromotion({
+        humanReviewed: approved,
+        independentSourceCount: group.independent_source_count,
+      }),
+      memory_claim_tier: memoryClaimTier(candidate.context_type),
+      promotion_policy: promotionPolicyLabel(candidate.context_type),
     },
     tags: Array.from(new Set([...(candidate.tags ?? []), 'signal-group'])),
   });
@@ -748,7 +751,10 @@ export async function promoteSignalGroup(
       : group.blocked_reason
         ? [group.blocked_reason]
         : [];
-    const unresolvedBlockers = blockers.filter(blocker => !blocker.toLowerCase().includes('needs corroboration or approval'));
+    const unresolvedBlockers = blockers.filter(blocker => {
+      const normalized = blocker.toLowerCase();
+      return !(normalized.includes('approval') || normalized.includes('corroboration'));
+    });
     if (actor?.actor_type !== 'user' || unresolvedBlockers.length > 0) {
       throw validationError(group.blocked_reason ?? 'This Signal needs approval before becoming Memory.');
     }

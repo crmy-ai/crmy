@@ -1,4 +1,4 @@
--- Raw Context processing ledger
+-- Source processing ledger
 -- Up:
 
 CREATE TABLE IF NOT EXISTS raw_context_sources (

@@ -38,7 +38,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Tags,       label: 'Memory Types',  path: '/settings/registries',   roles: ['admin', 'owner'], group: 'Advanced' },
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'], group: 'Advanced' },
   { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'], group: 'Advanced' },
-  { icon: Zap,        label: 'Automations',   path: '/settings/advanced',     roles: ['admin', 'owner'], group: 'Advanced' },
+  { icon: Zap,        label: 'Automation Experiments', path: '/settings/advanced', roles: ['admin', 'owner'], group: 'Advanced' },
 ];
 
 const settingsGroupOrder = ['Personal', 'Setup', 'Sources', 'Safety', 'Advanced'];
@@ -112,7 +112,7 @@ function KnowledgeSourcesSettings() {
         token: authType === 'bearer_token' ? token : undefined,
         description: description.trim() || undefined,
       });
-      toast({ title: 'MCP connector saved', description: 'Test the connection before syncing snippets.' });
+      toast({ title: 'MCP connector saved', description: 'Test the connection before syncing Trusted Facts.' });
       resetForm();
     } catch (err) {
       toast({ title: 'Failed to save connector', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
@@ -122,7 +122,7 @@ function KnowledgeSourcesSettings() {
   const testMcpConnector = async (connection: KnowledgeSourceConnection) => {
     try {
       const result = await testConnection.mutateAsync(connection.id);
-      toast({ title: 'MCP connector is reachable', description: `${result.tool_count} tool(s) found; knowledge claim list is available.` });
+      toast({ title: 'MCP connector is reachable', description: `${result.tool_count} tool(s) found; Trusted Facts are available.` });
     } catch (err) {
       toast({ title: 'Connection test failed', description: err instanceof Error ? err.message : 'Please check the endpoint and credentials.', variant: 'destructive' });
     }
@@ -131,7 +131,7 @@ function KnowledgeSourcesSettings() {
   const syncMcpConnector = async (connection: KnowledgeSourceConnection) => {
     try {
       const result = await syncConnection.mutateAsync({ id: connection.id, limit: 100 });
-      toast({ title: 'Knowledge snippets synced', description: `${result.imported} imported, ${result.skipped} skipped, ${result.failed} failed.` });
+      toast({ title: 'Trusted Facts synced', description: `${result.imported} imported, ${result.skipped} skipped, ${result.failed} failed.` });
     } catch (err) {
       toast({ title: 'Sync failed', description: err instanceof Error ? err.message : 'Please test the connector and try again.', variant: 'destructive' });
     }
@@ -150,7 +150,7 @@ function KnowledgeSourcesSettings() {
   const deleteMcpConnector = async (connection: KnowledgeSourceConnection) => {
     try {
       await deleteConnection.mutateAsync(connection.id);
-      toast({ title: 'Connector deleted', description: 'Imported claims remain in Knowledge for review.' });
+      toast({ title: 'Connector deleted', description: 'Imported facts remain in Knowledge for review.' });
     } catch (err) {
       toast({ title: 'Failed to delete connector', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
     }
@@ -192,7 +192,7 @@ function KnowledgeSourcesSettings() {
             <h2 className="font-display font-bold text-lg text-foreground">Knowledge Sources</h2>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Configure MCP sources that import governed knowledge snippets into CRMy.
+            Connect MCP sources that import governed facts into the Knowledge workspace.
           </p>
         </div>
         <button
@@ -200,7 +200,7 @@ function KnowledgeSourcesSettings() {
           className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
         >
           <Plus className="h-4 w-4" />
-          Add Connector
+          Add MCP Connector
         </button>
       </div>
 
@@ -209,7 +209,7 @@ function KnowledgeSourcesSettings() {
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-foreground">Add MCP Knowledge Connector</p>
-              <p className="mt-1 text-sm text-muted-foreground">Credentials are stored with this outbound connector and are never shown after saving.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Use the credential for the external MCP source. It is stored encrypted and never shown after saving.</p>
             </div>
             <button onClick={resetForm} className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Close connector form">
               <X className="h-4 w-4" />
@@ -218,7 +218,7 @@ function KnowledgeSourcesSettings() {
           <div className="grid gap-3 md:grid-cols-2">
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Name</label>
-              <input className={`${inputCls} mt-1 w-full`} value={name} onChange={event => setName(event.target.value)} placeholder="Product snippets MCP" />
+              <input className={`${inputCls} mt-1 w-full`} value={name} onChange={event => setName(event.target.value)} placeholder="Product facts source" />
             </div>
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Transport</label>
@@ -254,7 +254,7 @@ function KnowledgeSourcesSettings() {
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">Sync snapshots snippets into Knowledge Claims for review; briefings do not live-query this source.</p>
+            <p className="text-xs text-muted-foreground">Sync imports fact candidates for governance; briefings and drafts use CRMy's approved snapshot, not a live MCP call.</p>
             <div className="flex gap-2">
               <button className={buttonOutline} onClick={resetForm}>Cancel</button>
               <button className={buttonPrimary} onClick={createMcpConnector} disabled={createConnection.isPending}>
@@ -274,7 +274,7 @@ function KnowledgeSourcesSettings() {
             <span className="text-xs text-muted-foreground">{connections.length}</span>
           </div>
           <Link to="/knowledge" className={buttonOutline}>
-            Review claims
+            Review facts
           </Link>
         </div>
 
@@ -296,7 +296,7 @@ function KnowledgeSourcesSettings() {
             <Server className="mx-auto h-7 w-7 text-muted-foreground/50" />
             <p className="mt-2 text-sm font-semibold text-foreground">No MCP connector configured</p>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-              Add a CRMy-compatible MCP source when you are ready to import company, product, and competitor snippets for review.
+              Add a CRMy-compatible MCP source when you are ready to import company, product, and competitor facts.
             </p>
           </div>
         )}
@@ -376,7 +376,7 @@ function KnowledgeSourcesSettings() {
         <div className="flex items-start gap-2">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
           <p>
-            Knowledge Sources stores outbound MCP connector credentials and imports short claim envelopes. It is not a document editor, folder browser, or knowledge base.
+            Knowledge Sources stores outbound MCP connector credentials and syncs short, source-backed facts. It is not a document editor, folder browser, or knowledge base.
           </p>
         </div>
       </div>
@@ -659,13 +659,14 @@ const API_KEY_SCOPE_GROUPS = [
     { value: 'systems:write', label: 'Sync/writeback' },
     { value: 'systems:admin', label: 'Connection admin' },
   ]},
-  { label: 'Knowledge Claims', scopes: [
+  { label: 'Knowledge', scopes: [
     { value: 'knowledge:read', label: 'Retrieve / review' },
     { value: 'knowledge:write', label: 'Author / govern' },
   ]},
   { label: 'Admin Setup', scopes: [
     { value: 'api_keys:admin', label: 'API keys' },
     { value: 'email_provider:admin', label: 'Shared email provider' },
+    { value: 'agent:admin', label: 'Agent settings' },
   ]},
   { label: 'Agent', scopes: [
     { value: 'agent:read', label: 'Read' },
@@ -721,6 +722,7 @@ const SCOPE_TEMPLATES = [
       'systems:admin',
       'api_keys:admin',
       'email_provider:admin',
+      'agent:admin',
       'hitl:admin',
       'ops:read',
       'ops:write',
@@ -5878,7 +5880,7 @@ function DatabaseSettings() {
         context_entries: number;
         signals?: number;
         memory?: number;
-        raw_context_sources?: number;
+        sources?: number;
         handoffs?: number;
       };
     };
@@ -6072,7 +6074,7 @@ EMBEDDING_MODEL=text-embedding-3-small`}</code></pre>
           {sampleCounts && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
               {[
-                ['Sources', sampleCounts.raw_context_sources ?? 0],
+                ['Sources', sampleCounts.sources ?? 0],
                 ['Signals', sampleCounts.signals ?? 0],
                 ['Memory', sampleCounts.memory ?? sampleCounts.context_entries],
                 ['Handoffs', sampleCounts.handoffs ?? 0],
@@ -6539,27 +6541,27 @@ function RegistriesSettings() {
 function AutomationsSettings() {
   const cards = [
     {
-      title: 'Action Rules',
-      description: 'Configure event-driven rules for context, handoffs, and governed actions. Use this when CRMy needs to route work after something changes.',
+      title: 'Experimental Action Rules',
+      description: 'Advanced event-driven routing for teams testing governed automation patterns. Keep critical production decisions in Handoffs, Action Context, and approved writeback flows.',
       Icon: Zap,
       href: '/automations?tab=triggers',
-      cta: 'Open action rules',
+      cta: 'Open experimental rules',
     },
     {
-      title: 'Sequences',
-      description: 'Experimental governed outbound orchestration. Keep customer engagement flows policy-aware and human-reviewable.',
+      title: 'Experimental Sequences',
+      description: 'Advanced customer-engagement experiments for teams validating governed outbound orchestration. This is not part of the default Core Profile.',
       Icon: ListOrdered,
       href: '/automations?tab=sequences',
-      cta: 'Open sequences',
+      cta: 'Open experimental sequences',
     },
   ];
 
   return (
     <div className="w-full">
       <div className="mb-6">
-        <h2 className="font-display text-lg font-bold text-foreground">Automations</h2>
+        <h2 className="font-display text-lg font-bold text-foreground">Experimental Automation</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Admin-only automation tools for routing events and governing outbound orchestration.
+          These advanced surfaces are available for controlled experiments, while the default product path stays focused on Sources, Signals, Memory, Action Context, Handoffs, and proof.
         </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
@@ -6591,14 +6593,14 @@ function SettingsSetupStrip({ userRole, hidden, onHide }: { userRole: NavRole; h
 
   const steps = [
     {
-      title: '1. Connect data',
-      description: 'Database first, then optional systems and context connectors.',
+      title: '1. Add Sources',
+      description: 'Start with the database, then add sample data or source connectors.',
       href: '/settings/database',
       Icon: Database,
     },
     {
-      title: '2. Enable agent',
-      description: 'Configure the Workspace Agent and retrieval behavior.',
+      title: '2. Prove retrieval',
+      description: 'Enable the Workspace Agent and verify it can use governed context.',
       href: '/settings/model',
       Icon: Sparkles,
     },

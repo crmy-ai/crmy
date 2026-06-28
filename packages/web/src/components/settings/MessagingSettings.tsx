@@ -1470,7 +1470,7 @@ export default function MessagingSettings() {
     <div className="w-full space-y-5">
       <div>
         <h2 className="font-display font-bold text-lg text-foreground mb-1">Context Connectors</h2>
-        <p className="text-sm text-muted-foreground">Configure provider OAuth, fallback sending, inbound email, source filters, and operational notifications.</p>
+        <p className="text-sm text-muted-foreground">Set up the email, calendar, and notification plumbing that lets CRMy collect Sources and route operational messages.</p>
       </div>
 
       <div className="flex flex-wrap gap-1 border-b border-border">

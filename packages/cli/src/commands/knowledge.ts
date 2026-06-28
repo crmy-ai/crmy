@@ -6,18 +6,18 @@ import { resolveSubjectRef } from './subject-ref.js';
 
 export function knowledgeCommand(): Command {
   const cmd = new Command('knowledge')
-    .description('Governed product knowledge retrieval (optional capability)');
+    .description('Trusted Fact retrieval (optional governed capability)');
 
   cmd.command('retrieve <query>')
-    .description('Retrieve approved, source-grounded, cited product/competitive claims for a customer action')
+    .description('Retrieve approved, source-grounded Trusted Facts for a customer action')
     .option('--subject <ref>', 'Customer subject as type:name or type:id to tailor relevance (e.g. account:Northstar Labs)')
     .option('--audience <audience>', 'customer_facing (strict) or internal (labeled)', 'customer_facing')
     .option('--competitor <name>', 'Competitor to focus on')
     .option('--persona <name>', 'Buyer persona')
     .option('--industry <name>', 'Customer industry')
     .option('--product-scope <list>', 'Comma-separated product/edition scopes')
-    .option('--include-stale', 'Include stale claims (internal audience only)')
-    .option('--limit <n>', 'Maximum claims to return', '8')
+    .option('--include-stale', 'Include stale facts (internal audience only)')
+    .option('--limit <n>', 'Maximum facts to return', '8')
     .option('--json', 'Print raw JSON')
     .action(async (query, opts) => {
       const client = await getClient();
@@ -57,7 +57,7 @@ export function knowledgeCommand(): Command {
         if (cite) console.log(`  Source: ${cite.source_label}${cite.source_url ? ` (${cite.source_url})` : ''}`);
       }
       if ((data.excluded_claims ?? []).length > 0) {
-        console.log(`\n${data.excluded_claims.length} claim(s) excluded (not customer-safe): ${data.excluded_claims.map((e: { reason: string }) => e.reason).join(', ')}`);
+        console.log(`\n${data.excluded_claims.length} fact(s) excluded (not customer-safe): ${data.excluded_claims.map((e: { reason: string }) => e.reason).join(', ')}`);
       }
       for (const warning of data.warnings ?? []) console.log(`⚠ ${warning}`);
       if (data.retrieval_receipt) {
@@ -69,12 +69,12 @@ export function knowledgeCommand(): Command {
   // --- Governance (Phase 7) ---
 
   cmd.command('list')
-    .description('List product knowledge claim envelopes for the admin review queue')
+    .description('List Trusted Facts for the admin review queue')
     .option('--status <status>', 'active | stale | deprecated | conflicting | rejected')
     .option('--approval <status>', 'approved | pending | unapproved | rejected')
-    .option('--needs-review', 'Only claims that are stale, conflicting, or pending approval')
+    .option('--needs-review', 'Only facts that are stale, conflicting, or pending approval')
     .option('--query <text>', 'Full-text filter over title/body/summary')
-    .option('--limit <n>', 'Maximum claims to return', '25')
+    .option('--limit <n>', 'Maximum facts to return', '25')
     .option('--json', 'Print raw JSON')
     .action(async (opts) => {
       const client = await getClient();
@@ -87,7 +87,7 @@ export function knowledgeCommand(): Command {
       });
       const data = JSON.parse(result);
       if (opts.json) { console.log(JSON.stringify(data, null, 2)); await client.close(); return; }
-      console.log(`${data.count ?? 0} claim(s):`);
+      console.log(`${data.count ?? 0} fact(s):`);
       for (const c of data.claims ?? []) {
         const ext = c.approved_for_external_use ? 'external-ok' : 'internal-only';
         console.log(`\n• ${c.id}`);
@@ -99,7 +99,7 @@ export function knowledgeCommand(): Command {
     });
 
   cmd.command('review <claimId>')
-    .description('Apply a governance decision to a product knowledge claim')
+    .description('Apply a governance decision to a Trusted Fact')
     .requiredOption('--decision <decision>', 'approve | reject | deprecate | mark_stale | reactivate')
     .option('--external-use <bool>', 'Set customer-facing eligibility (true/false); honored with approve')
     .option('--owner <actorId>', 'Assign or transfer the review owner')
@@ -121,11 +121,11 @@ export function knowledgeCommand(): Command {
     });
 
   cmd.command('conflicts')
-    .description('Detect competing product claims and recommend source-priority resolution')
-    .option('--category <name>', 'Limit to one claim category')
-    .option('--competitor <name>', 'Limit to claims about one competitor')
-    .option('--apply', 'Mark the lower-priority claim of each resolvable conflict as conflicting')
-    .option('--limit <n>', 'Maximum claims to scan', '50')
+    .description('Detect competing Trusted Facts and recommend source-priority resolution')
+    .option('--category <name>', 'Limit to one fact category')
+    .option('--competitor <name>', 'Limit to facts about one competitor')
+    .option('--apply', 'Mark the lower-priority fact of each resolvable conflict as conflicting')
+    .option('--limit <n>', 'Maximum facts to scan', '50')
     .option('--json', 'Print raw JSON')
     .action(async (opts) => {
       const client = await getClient();
