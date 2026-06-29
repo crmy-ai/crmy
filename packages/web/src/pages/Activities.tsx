@@ -669,7 +669,7 @@ function TranscriptDropsPanel({ isAdmin, onReview }: { isAdmin?: boolean; onRevi
       setPrefix('');
       setAccessKeyId('');
       setSecretAccessKey('');
-      toast({ title: 'Transcript drop added', description: 'Run sync to discover transcripts and notes.' });
+      toast({ title: 'Transcript drop added', description: 'Initial sync was queued. Use Sync later for a refresh or retry.' });
     } catch (err) {
       toast({ title: 'Could not add transcript drop', description: err instanceof Error ? err.message : 'Check the settings and try again.', variant: 'destructive' });
     }
@@ -800,7 +800,7 @@ function TranscriptDropsPanel({ isAdmin, onReview }: { isAdmin?: boolean; onRevi
               )}
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              {connection.last_sync_at ? `Last sync ${new Date(connection.last_sync_at).toLocaleString()}` : connection.last_error || 'Ready to sync transcripts and notes.'}
+              {connection.last_sync_at ? `Last sync ${new Date(connection.last_sync_at).toLocaleString()}` : connection.last_error || 'Initial sync queues automatically when the source is added.'}
             </p>
           </div>
         ))}
