@@ -51,6 +51,27 @@ test('a named toolset narrows the catalog and always includes core tools', () =>
   assert.ok(selected.some((tool) => tool.name === 'email_draft_preview'));
 });
 
+test('standard is the lean Core Profile default and excludes experimental surfaces', () => {
+  const names = toolNamesForToolset('standard');
+  assert.ok(names, 'standard toolset should resolve to a concrete working set');
+  assert.ok(names.size <= CORE_TOOLS.length + 2, 'standard should stay close to the core loop');
+  for (const name of [
+    'tool_guide',
+    'customer_record_resolve',
+    'briefing_get',
+    'action_context_get',
+    'context_find',
+    'context_ingest_auto',
+    'action_context_request_human_unblock',
+  ]) {
+    assert.equal(names.has(name), true, `${name} belongs in the Core Profile`);
+  }
+  for (const name of names) {
+    assert.equal(name.startsWith('sequence_'), false, `${name} should be opt-in only`);
+    assert.equal(name.startsWith('workflow_'), false, `${name} should be opt-in only`);
+  }
+});
+
 test('selection only narrows — it can never widen beyond the input (scope-safe)', () => {
   // Actor is only allowed two tools; asking for a broad toolset must not add any.
   const allowed = asTools(['tool_guide', 'briefing_get']);
@@ -70,8 +91,8 @@ test('resolveToolsetName precedence: explicit > env > actor default', () => {
   assert.equal(resolveToolsetName(undefined, 'agent', 'ops'), 'ops');
   assert.equal(resolveToolsetName('bogus', 'agent', undefined), 'standard', 'invalid explicit falls through to agent default');
   assert.equal(resolveToolsetName(undefined, 'agent', undefined), 'standard');
-  assert.equal(resolveToolsetName(undefined, 'user', undefined), FULL_TOOLSET, 'humans default to full');
-  assert.equal(resolveToolsetName(undefined, 'system', undefined), FULL_TOOLSET);
+  assert.equal(resolveToolsetName(undefined, 'user', undefined), 'standard', 'humans default to Core Profile');
+  assert.equal(resolveToolsetName(undefined, 'system', undefined), 'standard');
   assert.equal(resolveToolsetName(undefined, 'agent', 'full'), FULL_TOOLSET, 'CRMY_MCP_DEFAULT_TOOLSET=full restores legacy behavior');
 });
 

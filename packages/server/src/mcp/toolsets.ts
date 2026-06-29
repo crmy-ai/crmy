@@ -61,32 +61,10 @@ export interface ToolsetDefinition {
 export const TOOLSET_DEFINITIONS: Record<string, ToolsetDefinition> = {
   standard: {
     description:
-      'Common customer-reasoning loop: resolve a record, brief, ingest Source, review Signals, draft outreach/records, and check outcomes. Sensible lean default for most agents.',
+      'Core Profile default: resolve a customer, add Source, find Memory or Signals, brief, check Action Context, and route human review when needed.',
     tools: [
       'action_context_request_human_unblock',
-      'context_get',
       'context_ingest_auto',
-      'context_signal_group_list',
-      'context_signal_group_get',
-      'context_lineage_get',
-      'record_draft_preview',
-      'email_draft_preview',
-      'activity_create',
-      'activity_get',
-      'activity_search',
-      'assignment_create',
-      'assignment_list',
-      'assignment_review_queue',
-      'contact_search',
-      'contact_get',
-      'account_search',
-      'account_get',
-      'opportunity_search',
-      'opportunity_get',
-      'contact_outreach',
-      'deal_advance',
-      'hitl_submit_request',
-      'hitl_check_status',
     ],
   },
   record_lookup: {
@@ -248,21 +226,21 @@ export function isValidToolset(name: string | undefined | null): boolean {
  * Precedence:
  *   1. an explicit, valid `requested` toolset (per-connection selection);
  *   2. a valid `CRMY_MCP_DEFAULT_TOOLSET` operator default;
- *   3. a lean `standard` set for autonomous agents, `full` for humans/admins.
+ *   3. the lean Core Profile `standard` set.
  *
  * Invalid values fall through rather than throwing, so a typo cannot break a
  * connection — it just lands on the default.
  */
 export function resolveToolsetName(
   requested?: string | null,
-  actorType?: 'user' | 'agent' | 'system',
+  _actorType?: 'user' | 'agent' | 'system',
   envDefault?: string | null,
 ): string {
   const req = requested?.trim().toLowerCase();
   if (req && isValidToolset(req)) return req;
   const env = envDefault?.trim().toLowerCase();
   if (env && isValidToolset(env)) return env;
-  return actorType === 'agent' ? 'standard' : FULL_TOOLSET;
+  return 'standard';
 }
 
 /**
@@ -292,7 +270,7 @@ export function listToolsets(): Array<{ name: string; description: string }> {
   return [
     {
       name: FULL_TOOLSET,
-      description: 'Every tool your credentials allow. Best for humans and admins; large for autonomous agents.',
+      description: 'Every tool your credentials allow. Explicit opt-in for humans/operators; large for autonomous agents.',
     },
     ...Object.entries(TOOLSET_DEFINITIONS).map(([name, def]) => ({ name, description: def.description })),
   ];

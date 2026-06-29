@@ -244,6 +244,21 @@ the sweep/gate respect it on the next run; defaults are unchanged for everyone e
 
 ### WS5 — Core Profile as the default product (Gap 3 + agents perform better)
 
+**Status:** Implemented in the WS5 checkpoint. MCP sessions now default to the
+lean Core Profile `standard` toolset for every actor type unless an operator
+explicitly requests another toolset or sets `CRMY_MCP_DEFAULT_TOOLSET`; `standard`
+is limited to the core customer-reasoning loop plus Source ingest and human
+unblock. Experimental workflow/sequence toolsets remain available by explicit
+selection only, while Sequences are removed from the default Workspace Agent
+manifest and Automations/Sequences are absent from the dashboard first-run path.
+Progressive-disclosure copy now keeps semantic retrieval, automation, sequences,
+lineage internals, registries, and reliability work as opt-in administration
+surfaces.
+
+**Deviation:** WS5 keeps the compatible `/app/automations` route and Settings
+entry for admins as the explicit opt-in path; it removes links from first-run and
+default agent/toolset surfaces rather than deleting the experimental UI.
+
 **Deliverables:**
 
 1. **Core Profile is the install default.** Connector-free, lean default toolset.

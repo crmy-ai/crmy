@@ -1,6 +1,6 @@
 # CRMy User Guide
 
-Complete documentation for CRMy, the governed customer context and action guidance layer for AI agents. CRMy turns transcripts, notes, emails, CRM changes, and other messy customer context into source-grounded Signals, confirmed Memory, policy-aware action guidance, and proof for every step. It works connector-free (transcripts, notes, and emails are enough); CRM and warehouse systems of record are an optional upgrade.
+Complete documentation for CRMy, the governed customer context and action guidance layer for AI agents. Messy customer context in; agent-ready Signals, Memory, and action guidance out. CRMy turns transcripts, notes, emails, CRM changes, and other customer data into governed context, safe agent actions, and proof at every step. It works connector-free (transcripts, notes, and emails are enough); CRM and warehouse systems of record are an optional upgrade.
 
 New here? Run `npx -y @crmy/cli init --demo` then `npx -y @crmy/cli quickstart` to see the connector-free path end to end, or jump to [Getting Started](#getting-started).
 
@@ -206,10 +206,10 @@ Most CLI commands that work with customer records accept friendly references lik
 Start with the lifecycle, not the admin surfaces:
 
 1. **Overview** shows the scoped Focus Queue: source issues, Signals to confirm, Handoffs to decide, stale Memory, and deal/account work that needs attention.
-2. **Context** is the customer-context lifecycle: **Sources → Signals → Memory → Lineage**.
+2. **Context** is the customer-context lifecycle: **Sources → Signals → Memory**. Lineage is available on demand when you need proof detail.
 3. **Context → Sources** explains how context enters CRMy: Add Context, MCP/API, Customer Email, and Customer Activity.
 4. **Handoffs** is where humans approve, reject, reassign, or complete governed decisions.
-5. **Settings** is for workspace setup. Advanced automation, sequences, webhooks, system setup, registries, and reliability tools should not be the first-run path unless you are configuring the platform.
+5. **Settings** is for workspace setup. Advanced automation, sequences, webhooks, semantic retrieval, system setup, registries, and reliability tools are opt-in administration surfaces, not first-run requirements.
 
 For contributors deciding where new UI belongs, see [What Belongs Where](./what-belongs-where.md).
 
@@ -766,7 +766,7 @@ Agents should retrieve Memory into Active Context with `briefing_get`, `context_
 
 ### MCP-First Architecture
 
-All customer-context operations are defined as **MCP tools**. REST exposes the same actor-scoped tool surface, and the CLI is a thin wrapper over those tools. Friendly CLI commands cover setup, demos, Source ingestion, activity/email review, systems, workflows, and operational QA; `crmy tools list`, `crmy tools describe <tool_name>`, and `crmy tools call <tool_name>` provide direct access to the full visible MCP tool set. UI-first admin wizards such as mailbox/calendar OAuth and provider setup remain REST/UI surfaces because they involve redirects or secrets.
+All customer-context operations are defined as **MCP tools**. REST exposes the same actor-scoped tool surface, and the CLI is a thin wrapper over those tools. Friendly CLI commands cover setup, demos, Source ingestion, activity/email review, systems, knowledge, and operational QA; experimental workflow and sequence commands remain opt-in. `crmy tools list`, `crmy tools describe <tool_name>`, and `crmy tools call <tool_name>` provide direct access to the full visible MCP tool set. UI-first admin wizards such as mailbox/calendar OAuth and provider setup remain REST/UI surfaces because they involve redirects or secrets.
 
 Use high-level tools for most revenue agents: `briefing_get`, `customer_record_resolve`, `crm_search`, `context_ingest_auto`, `context_ingest`, `activity_create`, Signal promotion/handoff tools, compound actions, assignments, and HITL. Use `context_ingest_auto` for messy transcripts, emails, notes, and research; use `customer_record_resolve` when an agent needs to resolve a customer record before briefing or action. Reserve `context_add`, setup, mapping, operations, workflow administration, compatibility lookup tools, and systems-of-record tools for operator agents or human admins with explicit scopes.
 
