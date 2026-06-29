@@ -6808,6 +6808,8 @@ test('transcript source drops are durable, reviewable, and integrated with activ
   assert.match(service, /source_document_hash/);
   assert.match(service, /parent_content_hash/);
   assert.match(service, /customer_authored/);
+  assert.match(service, /enqueued_from: 'connection_create'/);
+  assert.match(service, /Initial sync queued automatically/);
   assert.match(service, /FOR UPDATE SKIP LOCKED|claimProcessingJobs/);
   assert.doesNotMatch(service, /console\.log\([^)]*text/i);
 

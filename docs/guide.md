@@ -1061,7 +1061,7 @@ crmy activities connect-calendar google --scope owned_accounts
 crmy activities transcript-sources
 crmy activities transcript-source create-local --name "Local transcripts" --path /tmp/crmy-transcripts
 crmy activities transcript-source create-s3 --name "Meeting transcripts" --bucket crmy-transcripts --region us-east-1 --access-key-id ... --secret-access-key ...
-crmy activities transcript-source sync <id>
+crmy activities transcript-source sync <id>  # manual refresh/retry; creation queues the first sync
 crmy activities transcripts --status needs_review
 crmy activities transcript resolve <id> --account <account-id>
 crmy activities classifications

@@ -284,7 +284,7 @@ export async function createContextSourceConnection(
     config: Record<string, unknown>;
     credentials?: Record<string, unknown>;
   },
-): Promise<{ connection: SourceConnection }> {
+): Promise<{ connection: SourceConnection; sync_job: { id: UUID; status: string }; message: string }> {
   if (!isGlobalActor(actor)) throw permissionDenied('Only admins and owners can configure transcript and notes drops.');
   const config = normalizeConfig(input.provider, input.config ?? {});
   assertProviderAllowed(input.provider, config);
@@ -305,7 +305,15 @@ export async function createContextSourceConnection(
     objectId: connection.id,
     afterData: { provider: connection.provider, name: connection.name },
   }).catch(() => {});
-  return { connection: safeConnection(connection) };
+  const syncJob = await contextSourceRepo.enqueueSyncJob(db, actor.tenant_id, connection.id, {
+    enqueued_from: 'connection_create',
+    requested_by: actor.actor_id,
+  });
+  return {
+    connection: safeConnection(connection),
+    sync_job: syncJob,
+    message: 'Transcript and notes source created. Initial sync queued automatically.',
+  };
 }
 
 export async function updateContextSourceConnection(

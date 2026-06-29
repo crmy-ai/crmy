@@ -237,7 +237,7 @@ Review/processing tools:
 - `context_source_object_reprocess`
 - `context_source_object_ignore`
 
-Supported providers are `s3` and `local_folder`. S3 credentials are encrypted and write-only. Local folders are intended for local/self-hosted installs and must be inside `CRMY_LOCAL_SOURCE_ROOTS`. Unmatched or ambiguous source objects create Handoffs and appear in Customer Activity Needs Context; resolving an object links it to a meeting or customer record and queues Source extraction into Signals, Memory, and Lineage.
+Supported providers are `s3` and `local_folder`. Creating a connection queues the initial sync automatically; `context_source_connection_sync` is for manual refreshes and retries. S3 credentials are encrypted and write-only. Local folders are intended for local/self-hosted installs and must be inside `CRMY_LOCAL_SOURCE_ROOTS`. Unmatched or ambiguous source objects create Handoffs and appear in Customer Activity Needs Context; resolving an object links it to a meeting or customer record and queues Source extraction into Signals, Memory, and Lineage.
 
 ## Assignment Tools
 
