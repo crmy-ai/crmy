@@ -2,8 +2,8 @@
 
 ## Status
 
-WS1 checkpoint implemented; WS2, WS3, WS4, WS5, and WS6 implemented in stacked
-checkpoints; WS7 not started. This is the next milestone after 0.9.4 and the largest single step
+WS1 checkpoint implemented; WS2, WS3, WS4, WS5, WS6, and WS7 implemented in stacked
+checkpoints. This is the next milestone after 0.9.4 and the largest single step
 toward a 1.0 production release. It is the
 authoritative development plan for 0.9.5; the
 [0.8–1.0 roadmap](roadmap-0.8-1.0.md) tracks the broader sequence and the
@@ -312,6 +312,18 @@ safety evals; the same packet is returned identically across surfaces.
 
 Full live two-provider certification is heavy (needs Salesforce + HubSpot
 sandboxes) and is **deferred to 0.9.7**. 0.9.5 delivers the testable foundation:
+
+**Status:** Implemented in the WS7 checkpoint. The previously planned
+`connector_certification` suite is now an implemented seeded gate in the
+`seeded_context` profile. It runs the resolved-subject canonical flow through
+connector-free and mocked HubSpot SoR paths, asserts the same versioned Action
+Context contract surface, verifies governed writeback-preview policy, checks
+lineage receipt coverage, and proves mapped-field conflicts/read-only mappings
+defer instead of allowing overwrite.
+
+**Deviation:** live Salesforce + HubSpot parity remains deferred to 0.9.7 as
+planned; 0.9.5 uses the deterministic mocked SoR adapter path for the parity
+harness.
 
 **Deliverables:**
 

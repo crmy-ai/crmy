@@ -2918,6 +2918,8 @@ GET    /api/v1/search?q=acme&limit=10
 
 Systems of Record connect CRMy to the enterprise sources that already hold customer state. The connector framework supports HubSpot, Salesforce, Databricks, and Snowflake through one governed model.
 
+CRMy is the audited decision layer on top of those systems, not a parallel source of field truth. When mapped SoR fields conflict, CRMy flags the conflict and defers to review instead of overwriting the system of record; agents can still inspect the same Action Context contract connector-free or through a mocked/live connector path.
+
 Use **Settings → Systems of Record** to:
 
 - Create encrypted connections. HubSpot uses OAuth app credentials by default: App ID, Client ID, Client Secret, Sample install URL, and CRMy's generated callback URL.
@@ -2980,7 +2982,7 @@ CRMy's 0.8-1.0 roadmap focuses on becoming the enterprise context and execution 
 
 The 0.8 direction expands CRMy beyond CRM-adjacent storage into a governed systems-of-record overlay across Salesforce, HubSpot, Databricks, and Snowflake. HubSpot is the first certified connector path; Salesforce, Databricks, and Snowflake share the same governed framework and should receive live-environment certification before production rollout. Connector and warehouse changes should emit normal CRMy events so existing Workflows, Sequences, HITL approvals, audit, and context extraction continue to operate through the same event bus.
 
-As of 0.9.4, CRMy has first-class local eval profiles for contract corpora, live-model extraction quality, seeded retrieval quality, Action Context decisions, source attribution, tool choice, and agent trajectory smoke coverage. Governed Knowledge retrieval is also available for safe company, product, pricing, security, implementation, roadmap, and competitive Trusted Facts: admins can review source-backed facts, agents can retrieve approved citations, and briefings/Action Context/email drafts can include them without mixing them into customer Memory. Connector certification and source-adapter automation for Trusted Facts remain roadmap. See the [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md) and [Governed Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
+As of 0.9.5, CRMy has first-class local eval profiles for contract corpora, live-model extraction quality, seeded retrieval quality, Action Context decisions, source attribution, deterministic connector parity, tool choice, and agent trajectory smoke coverage. Governed Knowledge retrieval is also available for safe company, product, pricing, security, implementation, roadmap, and competitive Trusted Facts: admins can review source-backed facts, agents can retrieve approved citations, and briefings/Action Context/email drafts can include them without mixing them into customer Memory. Live multi-provider connector certification and source-adapter automation for Trusted Facts remain roadmap. See the [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md) and [Governed Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
 
 Read the full roadmap: [CRMy 0.8-1.0 Roadmap: Enterprise Systems-Of-Record Overlay](roadmap-0.8-1.0.md). For hosted multi-instance production requirements, see the [CRMy 1.0 Multi-Instance Runtime Plan](multi-instance-runtime-plan.md).
 
