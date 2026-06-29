@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_CONTEXT_TYPES } from '../db/repos/context-type-registry.js';
+import { memoryClaimTier, memoryFreshnessWindowDays } from '../services/memory-trust.js';
 
 export interface ExtractionEvalFixture {
   id: string;
@@ -409,6 +410,8 @@ export class ExtractionEvalDb {
         ...type,
         tenant_id: this.options.tenantId,
         is_default: true,
+        default_freshness_days: memoryFreshnessWindowDays(type.type_name),
+        claim_tier: memoryClaimTier(type.type_name),
         created_at: this.now(),
         updated_at: this.now(),
       }));

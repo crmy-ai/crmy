@@ -2,8 +2,8 @@
 
 ## Status
 
-WS1 checkpoint implemented; WS2 and WS3 implemented in stacked checkpoints;
-WS4-WS7 not started. This is the next milestone after 0.9.4 and the largest single step
+WS1 checkpoint implemented; WS2, WS3, and WS4 implemented in stacked checkpoints;
+WS5-WS7 not started. This is the next milestone after 0.9.4 and the largest single step
 toward a 1.0 production release. It is the
 authoritative development plan for 0.9.5; the
 [0.8–1.0 roadmap](roadmap-0.8-1.0.md) tracks the broader sequence and the
@@ -211,6 +211,17 @@ parity audit has no open UI-only gaps on the golden path.
 ---
 
 ### WS4 — Tenant-tunable trust (calibration flag #2 + power without complexity)
+
+**Status:** Implemented in the WS4 checkpoint. Context type registry rows now carry
+`default_freshness_days` and `claim_tier`, seeded from the previous built-in
+freshness windows and Tier-1/Tier-2 sets. Stale Memory sweeps, review extension,
+Signal group readiness, Tier-2 recency, and promotion metadata now use those
+tenant settings with the old defaults as fallback. Admins can tune the settings
+through REST/MCP/CLI and the web Settings registry, while the agent model settings
+surface the governed Tier-2 policy next to the existing promotion threshold.
+
+**Deviation:** no new background worker was added; setting changes are picked up
+by the next existing freshness sweep or Signal group recompute.
 
 **Deliverables:**
 

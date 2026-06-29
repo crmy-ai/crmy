@@ -13,7 +13,7 @@ import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useRevealWebhookSecret, useRotateWebhookSecret, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useMeetingClassifications, useCreateMeetingClassification, useUpdateMeetingClassification, useDeleteMeetingClassification, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback, useKnowledgeSourceConnections, useCreateKnowledgeSourceConnection, useUpdateKnowledgeSourceConnection, useDeleteKnowledgeSourceConnection, useTestKnowledgeSourceConnection, useSyncKnowledgeSourceConnection } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useRevealWebhookSecret, useRotateWebhookSecret, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useUpdateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useMeetingClassifications, useCreateMeetingClassification, useUpdateMeetingClassification, useDeleteMeetingClassification, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback, useKnowledgeSourceConnections, useCreateKnowledgeSourceConnection, useUpdateKnowledgeSourceConnection, useDeleteKnowledgeSourceConnection, useTestKnowledgeSourceConnection, useSyncKnowledgeSourceConnection } from '@/api/hooks';
 import type { SystemMapping, SystemOfRecord } from '@/api/hooks';
 import type { KnowledgeSourceConnection } from '@crmy/shared';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
@@ -6264,6 +6264,7 @@ const SYSTEM_ACTIVITY_TYPES = [
 function RegistriesSettings() {
   const { data: ctxData, isLoading: ctxLoading } = useContextTypes();
   const createCtxType = useCreateContextType();
+  const updateCtxType = useUpdateContextType();
   const deleteCtxType = useDeleteContextType();
   const { data: actData, isLoading: actLoading } = useActivityTypes();
   const createActType = useCreateActivityType();
@@ -6276,6 +6277,8 @@ function RegistriesSettings() {
   const [ctxName, setCtxName] = useState('');
   const [ctxLabel, setCtxLabel] = useState('');
   const [ctxDesc, setCtxDesc] = useState('');
+  const [ctxFreshness, setCtxFreshness] = useState('120');
+  const [ctxTier, setCtxTier] = useState<'0' | '1' | '2'>('0');
   const [actName, setActName] = useState('');
   const [actLabel, setActLabel] = useState('');
   const [actCategory, setActCategory] = useState('');
@@ -6293,8 +6296,15 @@ function RegistriesSettings() {
   const handleCreateCtx = async () => {
     if (!ctxName.trim() || !ctxLabel.trim()) return;
     try {
-      await createCtxType.mutateAsync({ type_name: ctxName.trim(), label: ctxLabel.trim(), description: ctxDesc.trim() || undefined });
-      setCtxName(''); setCtxLabel(''); setCtxDesc('');
+      const freshnessDays = Number(ctxFreshness);
+      await createCtxType.mutateAsync({
+        type_name: ctxName.trim(),
+        label: ctxLabel.trim(),
+        description: ctxDesc.trim() || undefined,
+        default_freshness_days: Number.isFinite(freshnessDays) ? Math.min(3650, Math.max(1, Math.round(freshnessDays))) : undefined,
+        claim_tier: Number(ctxTier) as 0 | 1 | 2,
+      });
+      setCtxName(''); setCtxLabel(''); setCtxDesc(''); setCtxFreshness('120'); setCtxTier('0');
       toast({ title: 'Context type added' });
     } catch { toast({ title: 'Error', variant: 'destructive' }); }
   };
@@ -6331,6 +6341,7 @@ function RegistriesSettings() {
   };
 
   const inputCls = 'h-8 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
+  const miniInputCls = 'h-7 px-2 rounded-md border border-border bg-background text-xs text-foreground outline-none focus:ring-1 focus:ring-ring';
 
   return (
     <div className="max-w-2xl">
@@ -6369,23 +6380,56 @@ function RegistriesSettings() {
           ) : contextTypes.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">No custom context types added yet.</p>
           ) : contextTypes.map((t: any) => (
-            <div key={t.type_name} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card">
-              <span className="text-sm font-medium text-foreground flex-1">{t.label || t.type_name}</span>
+            <div key={t.type_name} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card flex-wrap">
+              <span className="text-sm font-medium text-foreground flex-1 min-w-[120px]">{t.label || t.type_name}</span>
               <span className="text-xs font-mono text-muted-foreground">{t.type_name}</span>
               {t.description && <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[200px]">{t.description}</span>}
-              <button
-                onClick={() => {
-                  if (confirmDelete === t.type_name) {
-                    deleteCtxType.mutate(t.type_name, { onSuccess: () => { toast({ title: 'Removed' }); setConfirmDelete(null); } });
-                  } else {
-                    setConfirmDelete(t.type_name);
-                    setTimeout(() => setConfirmDelete(null), 3000);
-                  }
-                }}
-                className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              <select
+                defaultValue={String(t.claim_tier ?? 0)}
+                onChange={e => updateCtxType.mutate({
+                  type_name: t.type_name,
+                  claim_tier: Number(e.target.value) as 0 | 1 | 2,
+                }, { onSuccess: () => toast({ title: 'Context type updated' }) })}
+                className={`${miniInputCls} w-20`}
+                aria-label={`${t.type_name} claim tier`}
               >
-                <Trash2 className="w-3 h-3" />
-              </button>
+                <option value="0">Tier 0</option>
+                <option value="1">Tier 1</option>
+                <option value="2">Tier 2</option>
+              </select>
+              <input
+                type="number"
+                min={1}
+                max={3650}
+                defaultValue={Number(t.default_freshness_days ?? 120)}
+                onBlur={e => {
+                  const days = Number(e.target.value);
+                  if (!Number.isFinite(days)) return;
+                  const bounded = Math.min(3650, Math.max(1, Math.round(days)));
+                  if (bounded === Number(t.default_freshness_days ?? 120)) return;
+                  updateCtxType.mutate({
+                    type_name: t.type_name,
+                    default_freshness_days: bounded,
+                  }, { onSuccess: () => toast({ title: 'Freshness window updated' }) });
+                }}
+                className={`${miniInputCls} w-20`}
+                aria-label={`${t.type_name} freshness days`}
+              />
+              {!t.is_default && (
+                <button
+                  onClick={() => {
+                    if (confirmDelete === t.type_name) {
+                      deleteCtxType.mutate(t.type_name, { onSuccess: () => { toast({ title: 'Removed' }); setConfirmDelete(null); } });
+                    } else {
+                      setConfirmDelete(t.type_name);
+                      setTimeout(() => setConfirmDelete(null), 3000);
+                    }
+                  }}
+                  className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -6393,6 +6437,12 @@ function RegistriesSettings() {
           <input value={ctxName} onChange={e => setCtxName(e.target.value)} placeholder="type_name (slug)" className={`${inputCls} w-36`} />
           <input value={ctxLabel} onChange={e => setCtxLabel(e.target.value)} placeholder="Label" className={`${inputCls} w-32`} />
           <input value={ctxDesc} onChange={e => setCtxDesc(e.target.value)} placeholder="Description (optional)" className={`${inputCls} flex-1 min-w-[120px]`} />
+          <select value={ctxTier} onChange={e => setCtxTier(e.target.value as '0' | '1' | '2')} className={`${inputCls} w-24`}>
+            <option value="0">Tier 0</option>
+            <option value="1">Tier 1</option>
+            <option value="2">Tier 2</option>
+          </select>
+          <input value={ctxFreshness} onChange={e => setCtxFreshness(e.target.value)} type="number" min={1} max={3650} placeholder="Fresh days" className={`${inputCls} w-28`} />
           <button onClick={handleCreateCtx} disabled={!ctxName.trim() || !ctxLabel.trim() || createCtxType.isPending}
             className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
             <Plus className="w-3 h-3 inline mr-1" />Add

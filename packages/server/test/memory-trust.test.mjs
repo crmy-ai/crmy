@@ -8,6 +8,7 @@ import {
   defaultMemoryReviewDate,
   groundingMethodForPromotion,
   memoryClaimTier,
+  memoryClaimTierForSettings,
   memoryFreshnessWindowDays,
   shouldMarkMemoryDueForReview,
 } from '../dist/services/memory-trust.js';
@@ -82,6 +83,33 @@ test('Tier-2 human_only policy never auto-promotes', () => {
   }), false);
 });
 
+test('claim tier override can classify custom and built-in context types', () => {
+  assert.equal(memoryClaimTierForSettings('customer_health_signal', { claim_tier: 2 }), 2);
+  assert.equal(memoryClaimTierForSettings('forecast_signal', { claim_tier: 1 }), 1);
+  assert.equal(canAutoPromoteSignalByTrustTier({
+    contextType: 'customer_health_signal',
+    claimTier: 2,
+    confidence: 0.92,
+    threshold: 0.85,
+    evidenceCount: 2,
+    independentSourceCount: 1,
+    tier2AutopromotePolicy: 'corroborated',
+    recencySatisfied: true,
+    sourceGrounded: true,
+    readinessReady: true,
+  }), false);
+  assert.equal(canAutoPromoteSignalByTrustTier({
+    contextType: 'forecast_signal',
+    claimTier: 1,
+    confidence: 0.92,
+    threshold: 0.85,
+    evidenceCount: 1,
+    independentSourceCount: 1,
+    sourceGrounded: true,
+    readinessReady: true,
+  }), true);
+});
+
 test('promotion grounding method reflects who or what confirmed Memory', () => {
   assert.equal(groundingMethodForPromotion({}), 'lexical');
   assert.equal(groundingMethodForPromotion({ independentSourceCount: 2 }), 'corroborated');
@@ -92,7 +120,9 @@ test('defaultMemoryReviewDate uses type-specific freshness windows', () => {
   const now = new Date('2026-06-28T00:00:00Z');
   assert.equal(memoryFreshnessWindowDays('forecast_signal'), 30);
   assert.equal(memoryFreshnessWindowDays('competitive_intel'), 45);
+  assert.equal(memoryFreshnessWindowDays('competitive_intel', { default_freshness_days: 14 }), 14);
   assert.equal(defaultMemoryReviewDate('forecast_signal', now), new Date(now.getTime() + 30 * DAY).toISOString());
+  assert.equal(defaultMemoryReviewDate('forecast_signal', now, { default_freshness_days: 14 }), new Date(now.getTime() + 14 * DAY).toISOString());
 });
 
 test('shouldMarkMemoryDueForReview flags undated active Memory after its window', () => {
@@ -133,8 +163,18 @@ test('computeMemoryIdsDueForReview returns only rows past their freshness window
       updated_at: null,
       created_at: new Date(now.getTime() - 10 * DAY).toISOString(),
     },
+    {
+      id: 'custom-override',
+      context_type: 'custom_signal',
+      valid_until: null,
+      reviewed_at: null,
+      promoted_at: null,
+      updated_at: null,
+      created_at: new Date(now.getTime() - 20 * DAY).toISOString(),
+      default_freshness_days: 14,
+    },
   ], now);
-  assert.deepEqual(ids, ['old-competitive']);
+  assert.deepEqual(ids, ['old-competitive', 'custom-override']);
 });
 
 test('model certification is required for auto-promotion by default', () => {

@@ -1512,6 +1512,21 @@ export const contextTypeRegistryAdd = z.object({
   type_name: z.string().min(1).max(100).regex(/^[a-z][a-z0-9_]*$/),
   label: z.string().min(1).max(200),
   description: z.string().optional(),
+  priority_weight: z.number().min(0).max(10).optional(),
+  confidence_half_life_days: z.number().int().min(1).max(3650).nullable().optional(),
+  default_freshness_days: z.number().int().min(1).max(3650).optional(),
+  claim_tier: z.union([z.literal(0), z.literal(1), z.literal(2)]).optional(),
+  idempotency_key: idempotencyKey,
+});
+
+export const contextTypeRegistryUpdate = z.object({
+  type_name: z.string().min(1).max(100).regex(/^[a-z][a-z0-9_]*$/),
+  label: z.string().min(1).max(200).optional(),
+  description: z.string().nullable().optional(),
+  priority_weight: z.number().min(0).max(10).optional(),
+  confidence_half_life_days: z.number().int().min(1).max(3650).nullable().optional(),
+  default_freshness_days: z.number().int().min(1).max(3650).optional(),
+  claim_tier: z.union([z.literal(0), z.literal(1), z.literal(2)]).optional(),
   idempotency_key: idempotencyKey,
 });
 

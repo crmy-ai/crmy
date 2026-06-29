@@ -22,6 +22,7 @@ import { runIdempotent } from '../dist/db/repos/idempotency.js';
 import { diffContextEntries, searchContextEntries } from '../dist/db/repos/context-entries.js';
 import { claimPendingRawContextSources, listRawContextSources } from '../dist/db/repos/raw-context-sources.js';
 import { DEFAULT_CONTEXT_TYPES } from '../dist/db/repos/context-type-registry.js';
+import { memoryClaimTier, memoryFreshnessWindowDays } from '../dist/services/memory-trust.js';
 import { withTransaction } from '../dist/db/transaction.js';
 import { encryptSecret, decryptSecret, redactSecrets } from '../dist/lib/secrets.js';
 import { extractContextFromActivity, parseExtractionOutput, parseExtractionResponse, shouldAutoPromoteSignal } from '../dist/agent/extraction.js';
@@ -1385,6 +1386,16 @@ class FakeSignalGroupCompletionDb {
         rowCount: 1,
       };
     }
+    if (text.startsWith('SELECT type_name, default_freshness_days, claim_tier FROM context_type_registry')) {
+      return {
+        rows: [{
+          type_name: params[1],
+          default_freshness_days: memoryFreshnessWindowDays(String(params[1])),
+          claim_tier: memoryClaimTier(String(params[1])),
+        }],
+        rowCount: 1,
+      };
+    }
     if (text.startsWith('UPDATE context_entries SET structured_data = $3::jsonb')) {
       this.entry = {
         ...this.entry,
@@ -1991,6 +2002,8 @@ class FakeExtractionDb {
         ...type,
         tenant_id: extractionTenantId,
         is_default: true,
+        default_freshness_days: memoryFreshnessWindowDays(type.type_name),
+        claim_tier: memoryClaimTier(type.type_name),
         created_at: this.now(),
         updated_at: this.now(),
       }));

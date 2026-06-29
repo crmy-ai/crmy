@@ -676,6 +676,7 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   action_context_request_human_unblock: 'Creating human unblock request…',
   context_type_list:           'Loading context types…',
   context_type_add:            'Adding context type…',
+  context_type_update:         'Updating context type…',
   context_type_remove:         'Removing context type…',
 
   // Pipeline / reporting

@@ -24,10 +24,11 @@ import {
   canAutoPromoteSignalByTrustTier,
   defaultMemoryReviewDate,
   groundingMethodForPromotion,
-  memoryClaimTier,
+  memoryClaimTierForSettings,
   memoryFreshnessWindowDays,
-  promotionPolicyLabel,
+  promotionPolicyLabelForTier,
   tier2AutopromotePolicyFromEnv,
+  type ContextTypeTrustSettings,
   type Tier2AutopromotePolicy,
 } from './memory-trust.js';
 import { completeOpenReviewAssignmentsForContextEntry } from './review-queue.js';
@@ -123,8 +124,12 @@ function dateValue(value: unknown): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function entryHasRecentEvidence(entry: ContextEntry, now = new Date()): boolean {
-  const windowMs = memoryFreshnessWindowDays(entry.context_type) * 24 * 60 * 60 * 1000;
+function entryHasRecentEvidence(
+  entry: ContextEntry,
+  now = new Date(),
+  settings?: ContextTypeTrustSettings | null,
+): boolean {
+  const windowMs = memoryFreshnessWindowDays(entry.context_type, settings) * 24 * 60 * 60 * 1000;
   return evidenceItems(entry).some(evidence => {
     const observed = dateValue(evidence.source_event_at)
       ?? dateValue(evidence.observed_at)
@@ -452,7 +457,8 @@ async function recomputeGroup(
       structured_data: latest.structured_data,
     })
     : { should_block: false };
-  const claimTier = memoryClaimTier(group.context_type);
+  const trustSettings = await contextTypeRepo.getTypeTrustSettings(db, tenantId as UUID, group.context_type);
+  const claimTier = memoryClaimTierForSettings(group.context_type, trustSettings);
   const highImpact = claimTier === 2;
   const state = groupStatus({
     confidence,
@@ -507,7 +513,8 @@ async function recomputeGroup(
       sensitive: highImpact,
       high_impact: highImpact,
       claim_tier: claimTier,
-      promotion_policy: promotionPolicyLabel(group.context_type),
+      promotion_policy: promotionPolicyLabelForTier(claimTier),
+      default_freshness_days: memoryFreshnessWindowDays(group.context_type, trustSettings),
       threshold,
       trust_score: confidence,
       confidence_components: components,
@@ -592,13 +599,16 @@ async function promoteReadyGroup(
     humanReviewed: approved,
     independentSourceCount: group.independent_source_count,
   });
+  const candidateTrustSettings = await contextTypeRepo.getTypeTrustSettings(db, tenantId as UUID, candidate.context_type);
+  const candidateClaimTier = memoryClaimTierForSettings(candidate.context_type, candidateTrustSettings);
   const regroundingTarget = await findRegroundingTarget(db, tenantId, candidate);
   if (regroundingTarget) {
+    const targetTrustSettings = await contextTypeRepo.getTypeTrustSettings(db, tenantId as UUID, regroundingTarget.context_type);
     const reviewed = await contextRepo.reviewContextEntry(
       db,
       tenantId as UUID,
       regroundingTarget.id,
-      memoryFreshnessWindowDays(regroundingTarget.context_type),
+      memoryFreshnessWindowDays(regroundingTarget.context_type, targetTrustSettings),
       promotionGrounding,
     );
     if (reviewed) {
@@ -649,15 +659,15 @@ async function promoteReadyGroup(
     confidence: group.aggregate_confidence,
     evidence,
     grounding_method: promotionGrounding,
-    valid_until: candidate.valid_until ?? defaultMemoryReviewDate(candidate.context_type),
+    valid_until: candidate.valid_until ?? defaultMemoryReviewDate(candidate.context_type, new Date(), candidateTrustSettings),
     structured_data: {
       ...candidate.structured_data,
       signal_group_id: group.id,
       signal_group_support_count: group.support_count,
       signal_group_independent_sources: group.independent_source_count,
       grounding_method: promotionGrounding,
-      memory_claim_tier: memoryClaimTier(candidate.context_type),
-      promotion_policy: promotionPolicyLabel(candidate.context_type),
+      memory_claim_tier: candidateClaimTier,
+      promotion_policy: promotionPolicyLabelForTier(candidateClaimTier),
     },
     tags: Array.from(new Set([...(candidate.tags ?? []), 'signal-group'])),
   });
@@ -828,12 +838,18 @@ export async function attachSignalToGroup(
     .map(member => member.context_entry)
     .filter(Boolean) as ContextEntry[];
   const tier2Policy = options.tier2AutopromotePolicy ?? tier2AutopromotePolicyFromEnv();
-  const recentIndependentSources = new Set(supporting.filter(entry => entryHasRecentEvidence(entry)).map(sourceKey)).size;
-  const recencySatisfied = memoryClaimTier(signalGroup.context_type) === 2
+  const trustSettingsMap = await contextTypeRepo.getTypeTrustSettingsMap(db, tenantId as UUID);
+  const signalGroupTrustSettings = trustSettingsMap.get(signalGroup.context_type);
+  const claimTier = memoryClaimTierForSettings(signalGroup.context_type, signalGroupTrustSettings);
+  const recentIndependentSources = new Set(supporting
+    .filter(entry => entryHasRecentEvidence(entry, new Date(), trustSettingsMap.get(entry.context_type)))
+    .map(sourceKey)).size;
+  const recencySatisfied = claimTier === 2
     ? recentIndependentSources >= 2
     : true;
   const autoPromoteAllowed = options.autoPromote && canAutoPromoteSignalByTrustTier({
     contextType: signalGroup.context_type,
+    claimTier,
     confidence: signalGroup.aggregate_confidence,
     threshold: options.threshold,
     evidenceCount: signalGroup.evidence_count,
@@ -847,6 +863,8 @@ export async function attachSignalToGroup(
     tier2_autopromote_policy: tier2Policy,
     tier2_recency_satisfied: recencySatisfied,
     tier2_recent_independent_source_count: recentIndependentSources,
+    claim_tier: claimTier,
+    default_freshness_days: memoryFreshnessWindowDays(signalGroup.context_type, signalGroupTrustSettings),
     auto_promote_allowed: autoPromoteAllowed,
   });
   const promoted = autoPromoteAllowed

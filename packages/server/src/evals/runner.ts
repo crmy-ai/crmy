@@ -25,6 +25,7 @@ import { DEFAULT_CONTEXT_TYPES } from '../db/repos/context-type-registry.js';
 import { extractContextFromActivity, parseExtractionOutput, shouldAutoPromoteSignal } from '../agent/extraction.js';
 import { encrypt } from '../agent/crypto.js';
 import { evaluateMemoryReadiness } from '../services/memory-readiness.js';
+import { memoryClaimTier, memoryFreshnessWindowDays } from '../services/memory-trust.js';
 import { detectRawContextSubjects } from '../services/raw-context-subjects.js';
 import { assembleBriefing } from '../services/briefing.js';
 import { getActionContext } from '../services/action-context.js';
@@ -1331,6 +1332,17 @@ class SeededActiveContextDb {
         type_name: type.type_name,
         priority_weight: type.priority_weight ?? 1,
         confidence_half_life_days: type.confidence_half_life_days ?? null,
+        default_freshness_days: memoryFreshnessWindowDays(type.type_name),
+        claim_tier: memoryClaimTier(type.type_name),
+      })));
+    }
+    if (text.includes('FROM context_type_registry')) {
+      return this.rows(DEFAULT_CONTEXT_TYPES.map(type => ({
+        ...type,
+        tenant_id: TENANT_ID,
+        is_default: true,
+        default_freshness_days: memoryFreshnessWindowDays(type.type_name),
+        claim_tier: memoryClaimTier(type.type_name),
       })));
     }
     if (text.includes('SELECT * FROM context_entries WHERE') && text.includes('memory_status = $4')) {

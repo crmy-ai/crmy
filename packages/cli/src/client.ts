@@ -310,6 +310,7 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   // Context Type Registry
   context_type_list: { method: 'GET', path: () => '/api/v1/context-types' },
   context_type_add: { method: 'POST', path: () => '/api/v1/context-types' },
+  context_type_update: { method: 'PATCH', path: (i) => `/api/v1/context-types/${i.type_name}` },
   context_type_remove: { method: 'DELETE', path: (i) => `/api/v1/context-types/${i.type_name}` },
 
   // Briefing

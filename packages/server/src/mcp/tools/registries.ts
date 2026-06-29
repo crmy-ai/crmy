@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import {
   activityTypeRegistryList, activityTypeRegistryAdd, activityTypeRegistryRemove,
-  contextTypeRegistryList, contextTypeRegistryAdd, contextTypeRegistryRemove,
+  contextTypeRegistryList, contextTypeRegistryAdd, contextTypeRegistryUpdate, contextTypeRegistryRemove,
 } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
@@ -94,7 +94,7 @@ export function registryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_type_add',
       tier: 'admin',
-      description: 'Register a new custom context type to extend the built-in taxonomy. Specify a type name, optional description, and JSON Schema for structured_data validation. Once registered, the type is available in context_add.',
+      description: 'Register a new custom context type to extend the built-in taxonomy. Optional trust settings control default freshness days and promotion risk tier. Once registered, the type is available in context_add.',
       inputSchema: contextTypeRegistryAdd,
       handler: async (input: z.infer<typeof contextTypeRegistryAdd>, actor: ActorContext) => {
         return runToolOperation(db, actor, 'context_type_add', input, async () => {
@@ -106,6 +106,29 @@ export function registryTools(db: DbPool): ToolDef[] {
             objectId: input.type_name,
           }),
         };
+        });
+      },
+    },
+    {
+      name: 'context_type_update',
+      tier: 'admin',
+      description: 'Update governed settings for a context type, including default freshness days, briefing priority weight, confidence half-life, and promotion risk tier. Tier 0 is informational, Tier 1 operational, and Tier 2 high-impact.',
+      inputSchema: contextTypeRegistryUpdate,
+      handler: async (input: z.infer<typeof contextTypeRegistryUpdate>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'context_type_update', input, async () => {
+          const { type_name: typeName, idempotency_key: idempotencyKey, ...patch } = input;
+          void idempotencyKey;
+          const entry = await contextTypeRepo.updateContextType(db, actor.tenant_id, typeName, patch);
+          if (!entry) {
+            throw new CrmyError('NOT_FOUND', `Context type '${typeName}' was not found.`, 404);
+          }
+          return {
+            context_type: entry,
+            mutation: mutationReceipt(actor, {
+              objectType: 'context_type',
+              objectId: typeName,
+            }),
+          };
         });
       },
     },

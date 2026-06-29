@@ -8,6 +8,11 @@ export type ContextGroundingMethod = typeof CONTEXT_GROUNDING_METHODS[number];
 export type MemoryClaimTier = 0 | 1 | 2;
 export type Tier2AutopromotePolicy = typeof TIER2_AUTOPROMOTE_POLICIES[number];
 
+export interface ContextTypeTrustSettings {
+  claim_tier?: number | null;
+  default_freshness_days?: number | null;
+}
+
 export const TIER_2_CONTEXT_TYPES = new Set([
   'approval',
   'commitment',
@@ -18,7 +23,7 @@ export const TIER_2_CONTEXT_TYPES = new Set([
   'risk',
 ]);
 
-const TIER_1_CONTEXT_TYPES = new Set([
+export const TIER_1_CONTEXT_TYPES = new Set([
   'buying_process',
   'competitive_intel',
   'decision',
@@ -43,6 +48,20 @@ function normalizeContextType(contextType: string | undefined | null): string {
 }
 
 export function memoryClaimTier(contextType: string | undefined | null): MemoryClaimTier {
+  return builtInMemoryClaimTier(contextType);
+}
+
+export function normalizeMemoryClaimTier(
+  value: unknown,
+  contextType?: string | undefined | null,
+): MemoryClaimTier {
+  if (value === null || value === undefined || value === '') return builtInMemoryClaimTier(contextType);
+  const numeric = Number(value);
+  if (numeric === 0 || numeric === 1 || numeric === 2) return numeric;
+  return builtInMemoryClaimTier(contextType);
+}
+
+function builtInMemoryClaimTier(contextType: string | undefined | null): MemoryClaimTier {
   const normalized = normalizeContextType(contextType);
   if (TIER_2_CONTEXT_TYPES.has(normalized)) return 2;
   if (TIER_1_CONTEXT_TYPES.has(normalized)) return 1;
@@ -60,7 +79,19 @@ export function tier2AutopromotePolicyFromEnv(
   return normalizeTier2AutopromotePolicy(env.CRMY_TIER2_AUTOPROMOTE_POLICY);
 }
 
-export function memoryFreshnessWindowDays(contextType: string | undefined | null): number {
+export function memoryClaimTierForSettings(
+  contextType: string | undefined | null,
+  settings?: ContextTypeTrustSettings | null,
+): MemoryClaimTier {
+  return normalizeMemoryClaimTier(settings?.claim_tier, contextType);
+}
+
+export function memoryFreshnessWindowDays(
+  contextType: string | undefined | null,
+  settings?: ContextTypeTrustSettings | null,
+): number {
+  const configured = Number(settings?.default_freshness_days);
+  if (Number.isFinite(configured) && configured >= 1) return Math.floor(configured);
   const normalized = normalizeContextType(contextType);
   if (/forecast|next_step|approval/.test(normalized)) return 30;
   if (/risk|objection|methodology|competitive/.test(normalized)) return 45;
@@ -70,8 +101,12 @@ export function memoryFreshnessWindowDays(contextType: string | undefined | null
   return 120;
 }
 
-export function defaultMemoryReviewDate(contextType: string | undefined | null, now = new Date()): string {
-  return new Date(now.getTime() + memoryFreshnessWindowDays(contextType) * DAY_MS).toISOString();
+export function defaultMemoryReviewDate(
+  contextType: string | undefined | null,
+  now = new Date(),
+  settings?: ContextTypeTrustSettings | null,
+): string {
+  return new Date(now.getTime() + memoryFreshnessWindowDays(contextType, settings) * DAY_MS).toISOString();
 }
 
 export function hasUsableReviewDate(validUntil: string | undefined | null): boolean {
@@ -99,12 +134,15 @@ export function shouldMarkMemoryDueForReview(input: {
   promoted_at?: string | null;
   updated_at?: string | null;
   created_at?: string | null;
+  default_freshness_days?: number | null;
 }, now = new Date()): boolean {
   if (hasUsableReviewDate(input.valid_until)) return false;
   const reference = memoryFreshnessReferenceDate(input);
   if (!reference) return false;
   const ageDays = (now.getTime() - reference.getTime()) / DAY_MS;
-  return ageDays > memoryFreshnessWindowDays(input.context_type);
+  return ageDays > memoryFreshnessWindowDays(input.context_type, {
+    default_freshness_days: input.default_freshness_days,
+  });
 }
 
 export function groundingMethodForPromotion(input: {
@@ -124,6 +162,7 @@ export function canAutoPromoteSignalByTrustTier(input: {
   independentSourceCount?: number;
   tier2AutopromotePolicy?: Tier2AutopromotePolicy;
   recencySatisfied?: boolean;
+  claimTier?: MemoryClaimTier | number | null;
   sourceGrounded: boolean;
   speculative?: boolean;
   readinessReady?: boolean;
@@ -134,7 +173,7 @@ export function canAutoPromoteSignalByTrustTier(input: {
   if (input.readinessReady === false) return false;
   if ((input.confidence ?? 0) < input.threshold) return false;
 
-  const tier = memoryClaimTier(input.contextType);
+  const tier = normalizeMemoryClaimTier(input.claimTier, input.contextType);
   if (tier === 2) {
     if (normalizeTier2AutopromotePolicy(input.tier2AutopromotePolicy) === 'human_only') return false;
     if (input.recencySatisfied !== true) return false;
@@ -145,6 +184,10 @@ export function canAutoPromoteSignalByTrustTier(input: {
 
 export function promotionPolicyLabel(contextType: string | undefined | null): string {
   const tier = memoryClaimTier(contextType);
+  return promotionPolicyLabelForTier(tier);
+}
+
+export function promotionPolicyLabelForTier(tier: MemoryClaimTier): string {
   if (tier === 2) return 'human_or_corroborated';
   if (tier === 1) return 'grounded_with_freshness_window';
   return 'grounded_low_risk';
