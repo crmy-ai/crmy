@@ -4,13 +4,13 @@
 
 <h1 align="center">CRMy</h1>
 
-<h2 align="center">Governed customer context and action guidance for AI agents</h2>
+<h2 align="center">Open-source governed context for customer-facing agents</h2>
 
 <p align="center">
-  <strong>Messy customer context in. Agent-ready Signals, Memory, and action guidance out.</strong>
+  <strong>Source-grounded Signals, confirmed Memory, Action Context, and audit receipts.</strong>
 </p>
 <p align="center">
-  Customer-facing AI agents need more than raw CRM data in a prompt. They need to know what the customer actually said, what is stale or inferred, which actions are safe, and when a human needs to approve. CRMy turns transcripts, notes, emails, and CRM changes into source-grounded Signals and confirmed Memory, gives agents action guidance with policy and freshness checks, and records proof for every decision. Your agents act on evidence-backed context, not unsupported model guesses, and your team can audit every move.
+  CRMy is developer infrastructure for agents that need to work with customer context safely. It ingests transcripts, notes, emails, and CRM changes, extracts source-grounded Signals, promotes confirmed Memory when policy allows, and serves Action Context over MCP, REST, CLI, and the web UI. Agents can distinguish evidence from inference, see stale or risky claims, route approvals to humans, and leave an auditable trail for every action.
 </p>
 
 <p align="center">

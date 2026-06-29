@@ -1,6 +1,6 @@
 # CRMy User Guide
 
-Complete documentation for CRMy, the governed customer context and action guidance layer for AI agents. Messy customer context in; agent-ready Signals, Memory, and action guidance out. CRMy turns transcripts, notes, emails, CRM changes, and other customer data into governed context, safe agent actions, and proof at every step. It works connector-free (transcripts, notes, and emails are enough); CRM and warehouse systems of record are an optional upgrade.
+Complete documentation for CRMy, an open-source governed context layer for customer-facing agents. CRMy ingests transcripts, notes, emails, CRM changes, and other customer data; extracts source-grounded Signals; promotes confirmed Memory when policy allows; and serves Action Context over MCP, REST, CLI, and the web UI. It works connector-free (transcripts, notes, and emails are enough); CRM and warehouse systems of record are an optional upgrade.
 
 New here? Run `npx -y @crmy/cli init --demo` then `npx -y @crmy/cli quickstart` to see the connector-free path end to end, or jump to [Getting Started](#getting-started).
 
