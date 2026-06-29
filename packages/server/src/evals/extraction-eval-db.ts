@@ -377,6 +377,7 @@ export class ExtractionEvalDb {
       auto_extract_context: true,
       auto_promote_signals: false,
       signal_auto_promote_threshold: 0.85,
+      tier2_autopromote_policy: 'corroborated',
     };
   }
 

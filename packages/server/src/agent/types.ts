@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ProviderId } from '@crmy/shared';
+import type { Tier2AutopromotePolicy } from '../services/memory-trust.js';
 
 /** Persisted agent config (one per tenant). */
 export interface AgentConfig {
@@ -23,6 +24,7 @@ export interface AgentConfig {
   auto_promote_signals: boolean;
   signal_auto_promote_threshold: number;
   signal_source_quality: Record<string, number>;
+  tier2_autopromote_policy: Tier2AutopromotePolicy;
   model_certification_status: 'uncertified' | 'certified' | 'failed';
   model_certification_profile: string | null;
   model_certification_run_id: string | null;

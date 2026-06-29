@@ -25,7 +25,7 @@ import {
   cancelRunningAgentTurn,
   startAgentTurnRunner,
 } from './turn-runner.js';
-import type { AgentSessionAttachment, AgentTurn, AgentTurnEventRow } from './types.js';
+import type { AgentConfig, AgentSessionAttachment, AgentTurn, AgentTurnEventRow } from './types.js';
 import { previewRecordDraft, recordDraftPreviewSchema } from '../services/record-drafts.js';
 import {
   buildOpenAICompatibleHeaders,
@@ -36,7 +36,9 @@ import {
   MODEL_CERTIFICATION_MIN_SCORE,
   MODEL_CERTIFICATION_PROFILE,
   modelCertificationMeetsAutoPromoteGate,
+  recordedCertificationForModel,
 } from '../services/model-certification.js';
+import { normalizeTier2AutopromotePolicy } from '../services/memory-trust.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -73,6 +75,24 @@ function handleError(res: Response, err: unknown): void {
     status: 500,
     detail: safeErrorMessage(err, 'An unexpected agent error occurred. Check Model Settings and try again.'),
   });
+}
+
+function certificationResponseMeta(config: AgentConfig): Record<string, unknown> {
+  const certified = modelCertificationMeetsAutoPromoteGate(config);
+  const recorded = recordedCertificationForModel({ provider: config.provider, baseUrl: config.base_url, model: config.model });
+  const source = certified
+    ? recorded?.model_certification_run_id === config.model_certification_run_id ? 'crmy_published' : 'eval_run'
+    : null;
+  const automaticMemoryEnabled = config.auto_promote_signals !== false && certified;
+  return {
+    automatic_memory_enabled: automaticMemoryEnabled,
+    model_certification_source: source,
+    model_certification_prompt: automaticMemoryEnabled
+      ? null
+      : config.auto_promote_signals === false
+        ? 'Automatic Memory is disabled in this workspace.'
+        : 'Run `crmy certify` to enable automatic Memory for this Workspace Agent model. Until then, grounded Signals route to review only.',
+  };
 }
 
 function requireAdmin(actor: ActorContext): void {
@@ -1074,6 +1094,7 @@ export function agentRouter(db: DbPool): Router {
           ...keyMeta,
           backup_api_key_configured: backupKeyMeta.api_key_configured,
           backup_api_key_hint: backupKeyMeta.api_key_hint,
+          ...certificationResponseMeta(config),
         },
       });
     } catch (err) { handleError(res, err); }
@@ -1121,28 +1142,31 @@ export function agentRouter(db: DbPool): Router {
         }
         update.signal_source_quality = next;
       }
-      const allowManualCertification = process.env.NODE_ENV !== 'production'
-        && process.env.CRMY_ALLOW_MANUAL_MODEL_CERTIFICATION === 'true';
+      if (body.tier2_autopromote_policy !== undefined) {
+        const rawPolicy = String(body.tier2_autopromote_policy);
+        const policy = normalizeTier2AutopromotePolicy(rawPolicy);
+        if (!['corroborated', 'human_only'].includes(rawPolicy.trim().toLowerCase())) {
+          throw validationError('tier2_autopromote_policy must be corroborated or human_only.');
+        }
+        update.tier2_autopromote_policy = policy;
+      }
       if (typeof body.model_certification_status === 'string'
         && ['uncertified', 'certified', 'failed'].includes(body.model_certification_status)) {
-        if (body.model_certification_status === 'certified' && !allowManualCertification) {
+        if (body.model_certification_status === 'certified') {
           throw validationError(
-            'Model certification cannot be set manually. Run the eval certification flow and attach a verified run before enabling auto-promotion.',
+            'Model certification cannot be set manually. Run `crmy certify` or select a CRMy pre-certified recommended model.',
           );
         }
         update.model_certification_status = body.model_certification_status;
-        update.model_certified_at = body.model_certification_status === 'certified'
-          ? new Date().toISOString()
-          : null;
+        update.model_certification_profile = null;
+        update.model_certification_run_id = null;
+        update.model_certification_score = null;
+        update.model_certified_at = null;
       }
-      if (typeof body.model_certification_profile === 'string') {
-        update.model_certification_profile = body.model_certification_profile.slice(0, 100);
-      }
-      if (typeof body.model_certification_run_id === 'string') {
-        update.model_certification_run_id = body.model_certification_run_id.slice(0, 200);
-      }
-      if (typeof body.model_certification_score === 'number') {
-        update.model_certification_score = Number(Math.min(1, Math.max(0, body.model_certification_score)).toFixed(3));
+      for (const field of ['model_certification_profile', 'model_certification_run_id', 'model_certification_score', 'model_certified_at']) {
+        if (body[field] !== undefined) {
+          throw validationError('Model certification evidence is written only by `crmy certify` or the CRMy pre-certified model registry.');
+        }
       }
 
       const modelIdentityChanged = existingConfig
@@ -1152,12 +1176,24 @@ export function agentRouter(db: DbPool): Router {
           || (typeof body.model === 'string' && body.model !== existingConfig.model)
         )
         : false;
-      if (modelIdentityChanged && update.model_certification_status === undefined) {
-        update.model_certification_status = 'uncertified';
-        update.model_certification_profile = null;
-        update.model_certification_run_id = null;
-        update.model_certification_score = null;
-        update.model_certified_at = null;
+      if ((modelIdentityChanged || !existingConfig) && update.model_certification_status === undefined) {
+        const provider = String(update.provider ?? existingConfig?.provider ?? '');
+        const baseUrl = String(update.base_url ?? existingConfig?.base_url ?? '');
+        const model = String(update.model ?? existingConfig?.model ?? '');
+        const recorded = recordedCertificationForModel({ provider, baseUrl, model });
+        if (recorded) {
+          update.model_certification_status = recorded.model_certification_status;
+          update.model_certification_profile = recorded.model_certification_profile;
+          update.model_certification_run_id = recorded.model_certification_run_id;
+          update.model_certification_score = recorded.model_certification_score;
+          update.model_certified_at = recorded.model_certified_at;
+        } else {
+          update.model_certification_status = 'uncertified';
+          update.model_certification_profile = null;
+          update.model_certification_run_id = null;
+          update.model_certification_score = null;
+          update.model_certified_at = null;
+        }
       }
       const nextCertification = {
         model_certification_status: (update.model_certification_status ?? existingConfig?.model_certification_status ?? 'uncertified') as string,
@@ -1201,6 +1237,7 @@ export function agentRouter(db: DbPool): Router {
           ...buildKeyMeta(_enc2),
           backup_api_key_configured: backupKeyMeta.api_key_configured,
           backup_api_key_hint: backupKeyMeta.api_key_hint,
+          ...certificationResponseMeta(config),
         },
       });
     } catch (err) { handleError(res, err); }

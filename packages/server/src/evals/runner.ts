@@ -230,7 +230,7 @@ const SUITE_META: Record<EvalSuiteName, Omit<EvalSuiteSummary, 'case_count'>> = 
   },
 };
 
-interface ExpectedEntryLabel {
+export interface ExpectedEntryLabel {
   context_type: string;
   title_contains?: string;
   body_contains?: string;
@@ -238,12 +238,12 @@ interface ExpectedEntryLabel {
   required_structured_fields?: string[];
 }
 
-interface ForbiddenEntryLabel {
+export interface ForbiddenEntryLabel {
   context_type?: string;
   text_contains?: string;
 }
 
-interface CorpusFixture {
+export interface CorpusFixture {
   id: string;
   title?: string;
   source_type?: string;
@@ -1585,6 +1585,7 @@ function defaultAgentConfig(): AgentConfig {
     auto_promote_signals: false,
     signal_auto_promote_threshold: 0.85,
     signal_source_quality: { high: 1, medium: 0.9, lower: 0.75, fallback: 0.85 },
+    tier2_autopromote_policy: 'corroborated',
     model_certification_status: 'uncertified',
     model_certification_profile: null,
     model_certification_run_id: null,

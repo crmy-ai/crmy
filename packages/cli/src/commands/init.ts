@@ -13,6 +13,7 @@ import {
   getProvider,
   getProviderDefaultModel,
   isProviderId,
+  precertifiedCertificationForModel,
   type ProviderId,
 } from '@crmy/shared';
 
@@ -363,14 +364,21 @@ async function saveWorkspaceAgentConfig(
   process.env.CRMY_ENCRYPTION_KEY = encryptionKey;
   const { encryptAgentSecret } = await import('@crmy/server');
   const apiKeyEnc = setup.apiKey ? encryptAgentSecret(setup.apiKey) : null;
+  const certification = precertifiedCertificationForModel({
+    provider: setup.provider,
+    baseUrl: setup.baseUrl,
+    model: setup.model,
+  });
   await db.query(
     `INSERT INTO agent_configs (
        tenant_id, enabled, provider, base_url, api_key_enc, model,
        max_tokens_per_turn, history_retention_days,
        can_write_objects, can_log_activities, can_create_assignments,
-       auto_extract_context, auto_promote_signals, signal_auto_promote_threshold
+       auto_extract_context, auto_promote_signals, signal_auto_promote_threshold,
+       model_certification_status, model_certification_profile,
+       model_certification_run_id, model_certification_score, model_certified_at
      )
-     VALUES ($1, true, $2, $3, $4, $5, 4000, 90, true, true, true, true, true, 0.85)
+     VALUES ($1, true, $2, $3, $4, $5, 4000, 90, true, true, true, true, true, 0.85, $6, $7, $8, $9, $10)
      ON CONFLICT (tenant_id) DO UPDATE SET
        enabled = true,
        provider = EXCLUDED.provider,
@@ -383,8 +391,24 @@ async function saveWorkspaceAgentConfig(
        auto_extract_context = true,
        auto_promote_signals = true,
        signal_auto_promote_threshold = 0.85,
+       model_certification_status = EXCLUDED.model_certification_status,
+       model_certification_profile = EXCLUDED.model_certification_profile,
+       model_certification_run_id = EXCLUDED.model_certification_run_id,
+       model_certification_score = EXCLUDED.model_certification_score,
+       model_certified_at = EXCLUDED.model_certified_at,
        updated_at = now()`,
-    [tenantId, setup.provider, setup.baseUrl, apiKeyEnc, setup.model],
+    [
+      tenantId,
+      setup.provider,
+      setup.baseUrl,
+      apiKeyEnc,
+      setup.model,
+      certification?.status ?? 'uncertified',
+      certification?.profile ?? null,
+      certification?.run_id ?? null,
+      certification?.score ?? null,
+      certification?.certified_at ?? null,
+    ],
   );
 }
 
@@ -763,6 +787,16 @@ export function initCommand(): Command {
           spinner.succeed(
             `Workspace Agent configured  \x1b[2m(${getProvider(configuredAgent.provider).label} · ${configuredAgent.model})\x1b[0m`,
           );
+          const certification = precertifiedCertificationForModel({
+            provider: configuredAgent.provider,
+            baseUrl: configuredAgent.baseUrl,
+            model: configuredAgent.model,
+          });
+          if (certification) {
+            console.log(`  Automatic Memory enabled by CRMy certification ${certification.run_id} (${Math.round(certification.score * 100)}%).`);
+          } else {
+            console.log('  Automatic Memory will stay review-only until this model passes `crmy certify`.');
+          }
         } else {
           console.log('  Workspace Agent model setup skipped.');
           console.log('  Configure it later in Settings -> Model or rerun init with CRMY_AGENT_PROVIDER and CRMY_AGENT_MODEL.\n');

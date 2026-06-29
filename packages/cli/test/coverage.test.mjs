@@ -126,11 +126,14 @@ test('Action Context has a friendly CLI command and efficient REST mapping', asy
 test('Eval harness has a local CLI command and deterministic runner wiring', async () => {
   const indexSource = await read('packages/cli/src/index.ts');
   const commandSource = await read('packages/cli/src/commands/eval.ts');
+  const certifySource = await read('packages/cli/src/commands/certify.ts');
+  const helpSource = await read('packages/cli/src/commands/help.ts');
   const serverIndexSource = await read('packages/server/src/index.ts');
   const runnerSource = await read('packages/server/src/evals/runner.ts');
   const serverBuildScript = await read('packages/server/scripts/copy-web.cjs');
 
   assert.match(indexSource, /evalCommand/);
+  assert.match(indexSource, /certifyCommand/);
   assert.match(commandSource, /command\('list'\)/);
   assert.match(commandSource, /command\('describe <suite>'\)/);
   assert.match(commandSource, /command\('run'\)/);
@@ -141,7 +144,11 @@ test('Eval harness has a local CLI command and deterministic runner wiring', asy
   assert.match(commandSource, /includePlanned/);
   assert.match(commandSource, /runCrmyEval/);
   assert.match(commandSource, /listCrmyEvalSuites/);
+  assert.match(certifySource, /certifyTenantModel/);
+  assert.match(certifySource, /live_model eval suite/);
+  assert.match(helpSource, /certify/);
   assert.match(serverIndexSource, /listCrmyEvalSuites, runCrmyEval/);
+  assert.match(serverIndexSource, /certifyTenantModel/);
   assert.match(runnerSource, /raw_context_extraction/);
   assert.match(runnerSource, /raw_context_extraction_quality/);
   assert.match(runnerSource, /raw_context_custom_registry/);

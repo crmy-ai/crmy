@@ -21,10 +21,14 @@ import { ensureEmbeddingBestEffort } from './embedding-service.js';
 import { retrieveSignalGroupCandidates } from './context-candidate-retriever.js';
 import { deriveSignalReadiness, signalReadinessForGroup } from './signal-readiness.js';
 import {
+  canAutoPromoteSignalByTrustTier,
   defaultMemoryReviewDate,
   groundingMethodForPromotion,
   memoryClaimTier,
+  memoryFreshnessWindowDays,
   promotionPolicyLabel,
+  tier2AutopromotePolicyFromEnv,
+  type Tier2AutopromotePolicy,
 } from './memory-trust.js';
 
 const STOPWORDS = new Set([
@@ -110,6 +114,23 @@ function claimKey(entry: ContextEntry): string {
 
 function evidenceItems(entry: ContextEntry): Array<Record<string, unknown>> {
   return Array.isArray(entry.evidence) ? entry.evidence as Array<Record<string, unknown>> : [];
+}
+
+function dateValue(value: unknown): Date | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function entryHasRecentEvidence(entry: ContextEntry, now = new Date()): boolean {
+  const windowMs = memoryFreshnessWindowDays(entry.context_type) * 24 * 60 * 60 * 1000;
+  return evidenceItems(entry).some(evidence => {
+    const observed = dateValue(evidence.source_event_at)
+      ?? dateValue(evidence.observed_at)
+      ?? dateValue(evidence.captured_at)
+      ?? dateValue(entry.created_at);
+    return observed !== null && now.getTime() - observed.getTime() <= windowMs;
+  });
 }
 
 function stringValue(value: unknown): string | null {
@@ -609,6 +630,7 @@ export async function attachSignalToGroup(
     threshold: number;
     autoPromote: boolean;
     actorId: UUID | string;
+    tier2AutopromotePolicy?: Tier2AutopromotePolicy;
   },
 ): Promise<{
   signal_group: signalGroupRepo.SignalGroupWithMembers;
@@ -722,7 +744,33 @@ export async function attachSignalToGroup(
     signalGroup.id,
     [signalGroup.context_type, signalGroup.title ?? '', signalGroup.normalized_claim, signalGroup.subject_name ?? ''].filter(Boolean).join('\n'),
   );
-  const promoted = options.autoPromote
+  const supporting = signalGroup.members
+    .filter(member => member.relation === 'supports')
+    .map(member => member.context_entry)
+    .filter(Boolean) as ContextEntry[];
+  const tier2Policy = options.tier2AutopromotePolicy ?? tier2AutopromotePolicyFromEnv();
+  const recentIndependentSources = new Set(supporting.filter(entry => entryHasRecentEvidence(entry)).map(sourceKey)).size;
+  const recencySatisfied = memoryClaimTier(signalGroup.context_type) === 2
+    ? recentIndependentSources >= 2
+    : true;
+  const autoPromoteAllowed = options.autoPromote && canAutoPromoteSignalByTrustTier({
+    contextType: signalGroup.context_type,
+    confidence: signalGroup.aggregate_confidence,
+    threshold: options.threshold,
+    evidenceCount: signalGroup.evidence_count,
+    independentSourceCount: signalGroup.independent_source_count,
+    tier2AutopromotePolicy: tier2Policy,
+    recencySatisfied,
+    sourceGrounded: true,
+    readinessReady: signalGroup.status === 'ready',
+  });
+  await signalGroupRepo.updateSignalGroupMetadata(db, tenantId, signalGroup.id, {
+    tier2_autopromote_policy: tier2Policy,
+    tier2_recency_satisfied: recencySatisfied,
+    tier2_recent_independent_source_count: recentIndependentSources,
+    auto_promote_allowed: autoPromoteAllowed,
+  });
+  const promoted = autoPromoteAllowed
     ? await promoteReadyGroup(db, tenantId, signalGroup, options.actorId)
     : null;
   const refreshed = await signalGroupRepo.getSignalGroup(db, tenantId, signalGroup.id);

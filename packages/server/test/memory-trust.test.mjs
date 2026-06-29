@@ -16,7 +16,9 @@ import {
   isModelCertifiedForAutoPromote,
   modelCertificationMeetsAutoPromoteGate,
   modelCertificationRequired,
+  recordedCertificationForModel,
 } from '../dist/services/model-certification.js';
+import { setModelCertification } from '../dist/db/repos/agent.js';
 import { computeMemoryIdsDueForReview } from '../dist/services/staleness.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -46,7 +48,7 @@ test('canAutoPromoteSignalByTrustTier requires grounded evidence and blocks frag
   assert.equal(canAutoPromoteSignalByTrustTier({ ...base, confidence: 0.7 }), false);
 });
 
-test('high-impact claims need corroboration unless the grouping pass can find it', () => {
+test('Tier-2 corroborated policy requires independent sources and recency', () => {
   const base = {
     contextType: 'deal_risk',
     confidence: 0.92,
@@ -54,11 +56,30 @@ test('high-impact claims need corroboration unless the grouping pass can find it
     evidenceCount: 1,
     sourceGrounded: true,
     readinessReady: true,
+    tier2AutopromotePolicy: 'corroborated',
+    recencySatisfied: true,
   };
 
   assert.equal(canAutoPromoteSignalByTrustTier(base), false);
+  assert.equal(canAutoPromoteSignalByTrustTier({ ...base, independentSourceCount: 1 }), false);
   assert.equal(canAutoPromoteSignalByTrustTier({ ...base, independentSourceCount: 2 }), true);
-  assert.equal(canAutoPromoteSignalByTrustTier({ ...base, allowGroupCorroboration: true }), true);
+  assert.equal(canAutoPromoteSignalByTrustTier({ ...base, independentSourceCount: 2, recencySatisfied: false }), false);
+  assert.equal(canAutoPromoteSignalByTrustTier({ ...base, independentSourceCount: 2, sourceGrounded: false }), false);
+  assert.equal(canAutoPromoteSignalByTrustTier({ ...base, independentSourceCount: 2, confidence: 0.7 }), false);
+});
+
+test('Tier-2 human_only policy never auto-promotes', () => {
+  assert.equal(canAutoPromoteSignalByTrustTier({
+    contextType: 'forecast_signal',
+    confidence: 0.99,
+    threshold: 0.85,
+    evidenceCount: 2,
+    independentSourceCount: 3,
+    tier2AutopromotePolicy: 'human_only',
+    recencySatisfied: true,
+    sourceGrounded: true,
+    readinessReady: true,
+  }), false);
 });
 
 test('promotion grounding method reflects who or what confirmed Memory', () => {
@@ -165,4 +186,39 @@ test('modelCertificationMeetsAutoPromoteGate requires live-model run evidence', 
     model_certification_run_id: 'eval_run_123',
     model_certification_score: 0.84,
   }), false);
+});
+
+test('pre-certified recommended models carry gate-valid recorded provenance only on exact matches', () => {
+  const recommended = recordedCertificationForModel({
+    provider: 'openai',
+    baseUrl: 'https://api.openai.com/v1/',
+    model: 'gpt-5.2',
+  });
+  assert.ok(recommended);
+  assert.equal(modelCertificationMeetsAutoPromoteGate(recommended), true);
+  assert.equal(recordedCertificationForModel({
+    provider: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'arbitrary-local-model',
+  }), null);
+});
+
+test('setModelCertification rejects non-passing certified evidence before writing', async () => {
+  let wrote = false;
+  const db = {
+    async query() {
+      wrote = true;
+      throw new Error('should not write');
+    },
+  };
+  await assert.rejects(
+    () => setModelCertification(db, 'tenant-1', {
+      status: 'certified',
+      profile: 'contract',
+      runId: 'eval_contract',
+      score: 1,
+    }),
+    /requires a passing live_model eval/,
+  );
+  assert.equal(wrote, false);
 });

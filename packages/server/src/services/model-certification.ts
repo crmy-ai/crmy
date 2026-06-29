@@ -2,10 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentConfig } from '../agent/types.js';
+import {
+  MODEL_CERTIFICATION_MIN_SCORE,
+  MODEL_CERTIFICATION_PROFILE,
+  findPrecertifiedModel,
+  precertifiedCertificationForModel,
+  type RecordedModelCertification,
+} from '@crmy/shared';
 
 export const MODEL_CERTIFICATION_STATUSES = ['uncertified', 'certified', 'failed'] as const;
-export const MODEL_CERTIFICATION_PROFILE = 'live_model' as const;
-export const MODEL_CERTIFICATION_MIN_SCORE = 0.85;
+export { MODEL_CERTIFICATION_MIN_SCORE, MODEL_CERTIFICATION_PROFILE };
 
 export type ModelCertificationStatus = typeof MODEL_CERTIFICATION_STATUSES[number];
 
@@ -44,4 +50,34 @@ export function modelCertificationMeetsAutoPromoteGate(config: ModelCertificatio
     && config.model_certification_run_id.trim().length > 0
     && typeof config.model_certification_score === 'number'
     && config.model_certification_score >= MODEL_CERTIFICATION_MIN_SCORE;
+}
+
+export function modelCertificationEvidenceFromRecorded(
+  certification: RecordedModelCertification | null | undefined,
+): ModelCertificationEvidence & { model_certified_at?: string | null } | null {
+  if (!certification) return null;
+  const evidence = {
+    model_certification_status: certification.status,
+    model_certification_profile: certification.profile,
+    model_certification_run_id: certification.run_id,
+    model_certification_score: certification.score,
+    model_certified_at: certification.certified_at,
+  };
+  return modelCertificationMeetsAutoPromoteGate(evidence) ? evidence : null;
+}
+
+export function recordedCertificationForModel(input: {
+  provider?: string | null;
+  baseUrl?: string | null;
+  model?: string | null;
+}): (ModelCertificationEvidence & { model_certified_at?: string | null }) | null {
+  return modelCertificationEvidenceFromRecorded(precertifiedCertificationForModel(input));
+}
+
+export function modelCertificationSource(input: {
+  provider?: string | null;
+  baseUrl?: string | null;
+  model?: string | null;
+}): 'crmy_published' | null {
+  return findPrecertifiedModel(input) ? 'crmy_published' : null;
 }

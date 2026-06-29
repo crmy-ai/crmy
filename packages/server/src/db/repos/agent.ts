@@ -11,6 +11,11 @@ import type {
   AgentTurnEventRow,
 } from '../../agent/types.js';
 import type { AgentConfig } from '../../agent/types.js';
+import {
+  modelCertificationMeetsAutoPromoteGate,
+  type ModelCertificationStatus,
+} from '../../services/model-certification.js';
+import { normalizeTier2AutopromotePolicy, tier2AutopromotePolicyFromEnv } from '../../services/memory-trust.js';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -20,12 +25,67 @@ function normalizeConfig(row: AgentConfig | undefined): AgentConfig | null {
     ...row,
     llm_timeout_ms: row.llm_timeout_ms ?? 60_000,
     signal_source_quality: row.signal_source_quality ?? { high: 1.0, medium: 0.9, lower: 0.75, fallback: 0.85 },
+    tier2_autopromote_policy: normalizeTier2AutopromotePolicy(
+      row.tier2_autopromote_policy ?? tier2AutopromotePolicyFromEnv(),
+    ),
     model_certification_status: row.model_certification_status ?? 'uncertified',
     model_certification_profile: row.model_certification_profile ?? null,
     model_certification_run_id: row.model_certification_run_id ?? null,
     model_certification_score: row.model_certification_score ?? null,
     model_certified_at: row.model_certified_at ?? null,
   };
+}
+
+export interface SetModelCertificationInput {
+  status: ModelCertificationStatus;
+  profile?: string | null;
+  runId?: string | null;
+  score?: number | null;
+  certifiedAt?: string | null;
+}
+
+export async function setModelCertification(
+  db: DbPool,
+  tenantId: string,
+  input: SetModelCertificationInput,
+): Promise<AgentConfig> {
+  const status = input.status;
+  const score = typeof input.score === 'number' && Number.isFinite(input.score)
+    ? Number(Math.max(0, Math.min(1, input.score)).toFixed(3))
+    : null;
+  const evidence = {
+    model_certification_status: status,
+    model_certification_profile: input.profile ?? null,
+    model_certification_run_id: input.runId ?? null,
+    model_certification_score: score,
+  };
+  if (status === 'certified' && !modelCertificationMeetsAutoPromoteGate(evidence)) {
+    throw new Error('Certified model status requires a passing live_model eval run id and score.');
+  }
+  const certifiedAt = status === 'certified'
+    ? input.certifiedAt ?? new Date().toISOString()
+    : null;
+  const profile = status === 'uncertified' ? null : input.profile ?? null;
+  const runId = status === 'uncertified' ? null : input.runId ?? null;
+  const persistedScore = status === 'uncertified' ? null : score;
+
+  const { rows } = await db.query(
+    `INSERT INTO agent_configs (
+       tenant_id, model_certification_status, model_certification_profile,
+       model_certification_run_id, model_certification_score, model_certified_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (tenant_id) DO UPDATE SET
+       model_certification_status = EXCLUDED.model_certification_status,
+       model_certification_profile = EXCLUDED.model_certification_profile,
+       model_certification_run_id = EXCLUDED.model_certification_run_id,
+       model_certification_score = EXCLUDED.model_certification_score,
+       model_certified_at = EXCLUDED.model_certified_at,
+       updated_at = now()
+     RETURNING *`,
+    [tenantId, status, profile, runId, persistedScore, certifiedAt],
+  );
+  return normalizeConfig(rows[0])!;
 }
 
 export async function getConfig(db: DbPool, tenantId: string): Promise<AgentConfig | null> {
