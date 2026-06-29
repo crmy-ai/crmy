@@ -2,8 +2,8 @@
 
 ## Status
 
-WS1 checkpoint implemented; WS2 implemented in a stacked checkpoint; WS3-WS7 not
-started. This is the next milestone after 0.9.4 and the largest single step
+WS1 checkpoint implemented; WS2 and WS3 implemented in stacked checkpoints;
+WS4-WS7 not started. This is the next milestone after 0.9.4 and the largest single step
 toward a 1.0 production release. It is the
 authoritative development plan for 0.9.5; the
 [0.8–1.0 roadmap](roadmap-0.8-1.0.md) tracks the broader sequence and the
@@ -175,6 +175,22 @@ reviews through MCP with audit receipts.
 
 The "drop a transcript → the agent is ready" loop, fully headless.
 
+**Status:** Implemented in the WS3 checkpoint. `context_ingest_auto`, mailbox
+sync, delivered outbound email processing, calendar artifact processing, and
+context source objects already enter extraction/grouping/safe promotion
+automatically. WS3 closes the remaining source-connection gap: creating a
+transcript/raw-note source now queues the initial sync, so connect → sync →
+source-object processing → meeting artifact extraction runs without a second
+manual sync call. The headless audit found MCP/REST/CLI parity for the golden
+path actions: ingest/source receipts, transcript source connections, source
+object list/get/resolve/reprocess/ignore, Signal/Memory review and promotion,
+review assignments, Handoffs, briefing, and Action Context.
+
+**Deviation:** no new headless tool names were required; WS3 strengthened the
+default automation on the existing Source Drop service and documented that
+`context_source_connection_sync` / `crmy activities transcript-source sync` are
+manual refresh/retry paths.
+
 **Deliverables:**
 
 1. **Auto-extract on ingest by default.** Ensure `context_ingest_auto`, source
@@ -289,12 +305,12 @@ overwrites.
 Produce and close a checklist of loop-advancing actions and their headless
 equivalents:
 
-- ingest source / process source object — MCP/CLI ✔ (verify default auto-extract)
-- confirm Signal / promote Memory — ensure MCP parity, agent-resolvable for Tier-0/1
-- resolve stale/freshness review — agent-resolvable within policy
+- ingest source / process source object — MCP/CLI/REST ✔; source-drop creation queues the initial sync and matched objects process automatically
+- confirm Signal / promote Memory — MCP/CLI/REST ✔; Tier-0/1 agent-resolvable through assignment review policy
+- resolve stale/freshness review — MCP/CLI/REST ✔; agent-resolvable within policy
 - request human unblock / handoff — MCP ✔
-- writeback preview/request — MCP ✔
-- briefing / action context — MCP ✔
+- writeback preview/request — MCP/REST ✔
+- briefing / action context — MCP/CLI/REST ✔
 
 Any UI-only gap on the golden path is a release blocker.
 
