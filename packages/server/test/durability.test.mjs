@@ -1690,6 +1690,7 @@ test('local eval harness wraps deterministic customer-context corpora', async ()
     'retrieval_quality',
     'action_context',
     'source_attribution',
+    'connector_certification',
     'tool_choice',
     'agent_trajectory',
   ]);
@@ -1713,13 +1714,18 @@ test('local eval harness wraps deterministic customer-context corpora', async ()
 test('active context quality evals run seeded gates and live extraction without golden input', async () => {
   const seeded = await runCrmyEval({ profile: 'seeded_context' });
   assert.equal(seeded.status, 'pass');
-  assert.equal(seeded.totals.cases, 3);
+  assert.equal(seeded.totals.cases, 5);
   assert.equal(seeded.scores.required_context_recall, 1);
   assert.equal(seeded.scores.scope_leak_count, 0);
   assert.equal(seeded.scores.contract_shape_accuracy, 1);
   assert.equal(seeded.scores.readiness_decision_accuracy, 1);
   assert.equal(seeded.scores.high_risk_false_allow, 0);
   assert.equal(seeded.scores.unsafe_customer_claim_allowed, 0);
+  assert.equal(seeded.scores.connector_contract_parity, 1);
+  assert.equal(seeded.scores.writeback_preview_policy_accuracy, 1);
+  assert.equal(seeded.scores.lineage_parity_receipt_coverage, 1);
+  assert.equal(seeded.scores.sor_conflict_deferral, 1);
+  assert.equal(seeded.scores.readonly_writeback_false_allow, 0);
 
   const skippedLive = await runCrmyEval({ profile: 'live_model' });
   assert.equal(skippedLive.status, 'skipped');

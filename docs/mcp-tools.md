@@ -890,7 +890,7 @@ Query actor Memory contributions. Two modes:
 
 These tools are intentionally operator-facing. They are visible in an MCP session only when the actor has explicit systems scopes. Generic `read` and `write` shortcuts do not grant systems-of-record access. Governed external writeback tools also require the relevant object write scope, such as `contacts:write` or `opportunities:write`, before CRMy will preview, review, or execute a write.
 
-HubSpot is the first certified connector path. Salesforce, Databricks, and Snowflake use the same governed interfaces, but should be live-tested in the target environment before production rollout. `context_entry` mappings are reserved for the connector-author workflow and currently produce reviewable sync conflicts instead of silently creating memory.
+HubSpot is the first certified connector path. Salesforce, Databricks, and Snowflake use the same governed interfaces, but should be live-tested in the target environment before production rollout. CRMy stays the audited decision layer above systems of record: mapped-field conflicts are flagged and deferred instead of overwritten, and the seeded `connector_certification` eval proves the same Action Context contract across connector-free and mocked SoR paths. `context_entry` mappings are reserved for the connector-author workflow and currently produce reviewable sync conflicts instead of silently creating memory.
 
 ### sor_system_create
 Create a governed external system connection for HubSpot, Salesforce, Databricks, or Snowflake. Credentials are encrypted and redacted.

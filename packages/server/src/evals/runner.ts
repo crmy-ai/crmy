@@ -30,6 +30,9 @@ import { memoryClaimTier, memoryFreshnessWindowDays } from '../services/memory-t
 import { detectRawContextSubjects } from '../services/raw-context-subjects.js';
 import { assembleBriefing } from '../services/briefing.js';
 import { getActionContext } from '../services/action-context.js';
+import { getContextLineage } from '../services/context-lineage.js';
+import { previewExternalWriteback } from '../services/systems-of-record/index.js';
+import { encryptSecret } from '../lib/secrets.js';
 import { ExtractionEvalDb, type ExtractionEvalModelConfig } from './extraction-eval-db.js';
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -43,6 +46,8 @@ const SEED_OPPORTUNITY_ID = '55555555-5555-4555-8555-555555555555';
 const SEED_OTHER_ACCOUNT_ID = '66666666-6666-4666-8666-666666666666';
 const SEED_MAPPING_ID = '77777777-7777-4777-8777-777777777777';
 const SEED_SYSTEM_ID = '88888888-8888-4888-8888-888888888888';
+const SEED_READONLY_MAPPING_ID = '77777777-7777-4777-8777-777777777778';
+const SEED_WRITEBACK_ID = '77777777-7777-4777-8777-777777777779';
 const LIVE_EXTRACTION_ACTIVITY_ID = '99999999-9999-4999-8999-999999999991';
 
 const CONTRACT_SUITES: EvalSuiteName[] = [
@@ -52,7 +57,7 @@ const CONTRACT_SUITES: EvalSuiteName[] = [
 ];
 
 const LIVE_MODEL_SUITES: EvalSuiteName[] = ['raw_context_extraction_quality'];
-const SEEDED_CONTEXT_SUITES: EvalSuiteName[] = ['retrieval_quality', 'action_context', 'source_attribution'];
+const SEEDED_CONTEXT_SUITES: EvalSuiteName[] = ['retrieval_quality', 'action_context', 'source_attribution', 'connector_certification'];
 const AGENT_RUNTIME_SUITES: EvalSuiteName[] = ['tool_choice', 'agent_trajectory'];
 const IMPLEMENTED_SUITES: EvalSuiteName[] = [
   ...CONTRACT_SUITES,
@@ -60,7 +65,7 @@ const IMPLEMENTED_SUITES: EvalSuiteName[] = [
   ...SEEDED_CONTEXT_SUITES,
   ...AGENT_RUNTIME_SUITES,
 ];
-const ALL_SUITES: EvalSuiteName[] = [...IMPLEMENTED_SUITES, 'connector_certification'];
+const ALL_SUITES: EvalSuiteName[] = [...IMPLEMENTED_SUITES];
 
 const PROFILE_DEFAULT_SUITES: Record<EvalRunProfile, EvalSuiteName[]> = {
   contract: CONTRACT_SUITES,
@@ -86,6 +91,9 @@ const PROFILE_THRESHOLDS: Record<EvalRunProfile, EvalThreshold[]> = {
     { metric: 'readiness_decision_accuracy', op: '=', value: 1 },
     { metric: 'high_risk_false_allow', op: '=', value: 0 },
     { metric: 'unsafe_customer_claim_allowed', op: '=', value: 0 },
+    { metric: 'connector_contract_parity', op: '=', value: 1 },
+    { metric: 'sor_conflict_deferral', op: '=', value: 1 },
+    { metric: 'readonly_writeback_false_allow', op: '=', value: 0 },
   ],
   agent_runtime: [],
 };
@@ -220,16 +228,16 @@ const SUITE_META: Record<EvalSuiteName, Omit<EvalSuiteSummary, 'case_count'>> = 
   connector_certification: {
     name: 'connector_certification',
     title: 'Connector certification',
-    description: 'Planned suite for source ingestion and connector proof receipts.',
+    description: 'Seeded parity suite for connector-free vs mocked SoR Action Context contract, writeback preview, lineage, and conflict deferral.',
     deterministic: true,
     requires_model: false,
     requires_database: true,
-    implementation_status: 'planned',
-    proof_scope: 'Will certify connector ingestion, provenance, idempotency, and source receipts.',
+    implementation_status: 'implemented',
+    proof_scope: 'Runs the canonical resolved-subject flow against connector-free and mocked HubSpot SoR paths, proving the same Action Context contract and SoR deferral invariants.',
     profiles: ['seeded_context'],
-    quality_gate: false,
+    quality_gate: true,
     uses_golden_model_output: false,
-    limitations: ['Not implemented in 0.9.3 runner yet.'],
+    limitations: ['Uses a deterministic mocked SoR adapter path; live two-provider certification remains deferred to 0.9.7.'],
   },
 };
 
@@ -1109,6 +1117,13 @@ function seedContextEntry(input: {
 }
 
 class SeededActiveContextDb {
+  private eventSequence = 7000;
+
+  constructor(private readonly options: {
+    includeOpenConflict?: boolean;
+    includeWritebackRequest?: boolean;
+  } = {}) {}
+
   account = {
     id: SEED_ACCOUNT_ID,
     tenant_id: TENANT_ID,
@@ -1286,17 +1301,91 @@ class SeededActiveContextDb {
       system_id: SEED_SYSTEM_ID,
       object_type: 'contact',
       external_object: 'Contact',
+      external_id_field: 'id',
       readable_fields: ['email', 'title', 'lifecycle_stage'],
       writable_fields: ['title', 'lifecycle_stage'],
       field_mapping: {},
       source_authority: 'external',
-      writeback_mode: 'request_review',
+      writeback_mode: 'mapped_upsert',
       writeback_config: {},
+      allow_source_loop: false,
+      is_active: true,
+      created_at: seedNow(0),
+      updated_at: seedNow(0),
+    },
+    {
+      id: SEED_READONLY_MAPPING_ID,
+      tenant_id: TENANT_ID,
+      system_id: SEED_SYSTEM_ID,
+      object_type: 'contact',
+      external_object: 'Contact',
+      external_id_field: 'id',
+      readable_fields: ['email', 'title', 'lifecycle_stage'],
+      writable_fields: ['title'],
+      field_mapping: {},
+      source_authority: 'read_only',
+      writeback_mode: 'mapped_upsert',
+      writeback_config: {},
+      allow_source_loop: false,
       is_active: true,
       created_at: seedNow(0),
       updated_at: seedNow(0),
     },
   ];
+
+  system = {
+    id: SEED_SYSTEM_ID,
+    tenant_id: TENANT_ID,
+    name: 'Mock HubSpot',
+    system_type: 'hubspot',
+    auth_type: 'oauth_app',
+    status: 'connected',
+    encrypted_credentials: encryptSecret({ access_token: 'seed-token' }),
+    config: {},
+    sync_settings: {},
+    health: {},
+    created_at: seedNow(0),
+    updated_at: seedNow(0),
+  };
+
+  conflicts = [{
+    id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    tenant_id: TENANT_ID,
+    system_id: SEED_SYSTEM_ID,
+    mapping_id: SEED_MAPPING_ID,
+    object_type: 'contact',
+    object_id: SEED_CONTACT_ID,
+    external_object: 'Contact',
+    external_record_id: 'hs-contact-1',
+    field_name: 'title',
+    local_value: 'VP Sales',
+    external_value: 'Chief Revenue Officer',
+    status: 'open',
+    created_at: seedNow(1),
+  }];
+
+  writebacks = [{
+    id: SEED_WRITEBACK_ID,
+    tenant_id: TENANT_ID,
+    system_id: SEED_SYSTEM_ID,
+    mapping_id: SEED_MAPPING_ID,
+    object_type: 'contact',
+    object_id: SEED_CONTACT_ID,
+    external_object: 'Contact',
+    external_record_id: 'hs-contact-1',
+    operation: 'update',
+    writeback_mode: 'mapped_upsert',
+    preview: {},
+    payload: { title: 'VP Revenue' },
+    policy_result: { allowed: true, requires_approval: true },
+    status: 'approval_required',
+    execution_result: {},
+    requested_by: SEED_ACTOR_ID,
+    created_at: seedNow(1),
+    updated_at: seedNow(1),
+  }];
+
+  events: Record<string, unknown>[] = [];
 
   queryLog: string[] = [];
 
@@ -1304,6 +1393,25 @@ class SeededActiveContextDb {
     const text = sql.replace(/\s+/g, ' ').trim();
     this.queryLog.push(text);
 
+    if (text.startsWith('INSERT INTO events')) {
+      const id = this.eventSequence++;
+      const row = {
+        id,
+        tenant_id: params[0],
+        event_type: params[1],
+        actor_id: params[2],
+        actor_type: params[3],
+        object_type: params[4],
+        object_id: params[5],
+        before_data: typeof params[6] === 'string' ? JSON.parse(params[6]) : params[6],
+        after_data: typeof params[7] === 'string' ? JSON.parse(params[7]) : params[7],
+        metadata: typeof params[8] === 'string' ? JSON.parse(params[8]) : params[8],
+        created_at: seedNow(0),
+      };
+      this.events.push(row);
+      return this.rows([{ id }]);
+    }
+    if (text.startsWith('SELECT pg_notify')) return this.rows([]);
     if (text === 'SELECT id FROM users WHERE tenant_id = $1 AND id = $2 LIMIT 1') {
       return this.rows(params[1] === SEED_ACTOR_ID ? [{ id: SEED_ACTOR_ID }] : []);
     }
@@ -1377,12 +1485,54 @@ class SeededActiveContextDb {
         entry.valid_until,
       ));
     }
+    if (text.includes('FROM context_entries') && text.includes('ORDER BY created_at DESC')) {
+      const subjectType = params.find(param => param === 'contact' || param === 'account' || param === 'opportunity' || param === 'use_case');
+      const subjectId = params.find(param => typeof param === 'string' && param === SEED_CONTACT_ID);
+      if (subjectType && subjectId) {
+        return this.rows(this.contextEntries.filter(entry =>
+          entry.subject_type === subjectType &&
+          entry.subject_id === subjectId &&
+          entry.is_current,
+        ));
+      }
+      return this.rows([]);
+    }
     if (text.includes('FROM signal_groups sg')) return this.rows(this.signalGroups);
+    if (text.includes('FROM signal_group_members')) return this.rows([]);
     if (text.includes('FROM context_entries c1 JOIN context_entries c2')) return this.rows([]);
-    if (text.includes('SELECT * FROM external_object_mappings WHERE')) return this.rows(this.mappings);
-    if (text.includes('SELECT * FROM external_sync_conflicts WHERE')) return this.rows([]);
-    if (text.includes('FROM external_writeback_requests')) return this.rows([{ count: 0 }]);
+    if (text.includes('FROM raw_context_sources')) return this.rows([]);
+    if (text.includes('FROM hitl_requests')) return this.rows([]);
+    if (text.includes('SELECT * FROM external_systems')) return this.rows([this.system]);
+    if (text.includes('SELECT * FROM external_object_mappings WHERE')) {
+      if (params.includes(SEED_MAPPING_ID)) return this.rows(this.mappings.filter(mapping => mapping.id === SEED_MAPPING_ID));
+      if (params.includes(SEED_READONLY_MAPPING_ID)) return this.rows(this.mappings.filter(mapping => mapping.id === SEED_READONLY_MAPPING_ID));
+      const objectType = params.find(param => param === 'contact' || param === 'account' || param === 'opportunity' || param === 'activity' || param === 'use_case' || param === 'context_entry');
+      return this.rows(objectType ? this.mappings.filter(mapping => mapping.object_type === objectType && mapping.is_active) : this.mappings);
+    }
+    if (text.includes('SELECT * FROM external_sync_conflicts WHERE')) {
+      const rows = this.options.includeOpenConflict ? this.conflicts : [];
+      return this.rows(rows);
+    }
+    if (text.includes('SELECT count(*)::int AS count FROM external_writeback_requests')) {
+      return this.rows([{ count: this.options.includeWritebackRequest ? this.writebacks.length : 0 }]);
+    }
+    if (text.includes('FROM external_writeback_requests')) {
+      return this.rows(this.options.includeWritebackRequest ? this.writebacks : []);
+    }
     if (text.includes('FROM sequence_enrollments')) return this.rows([]);
+    if (text.includes('FROM events') && text.includes("event_type = 'action_context.retrieved'")) {
+      return this.rows(this.events.filter(event => event.event_type === 'action_context.retrieved'));
+    }
+    if (text.includes('FROM events') && text.includes("metadata ? 'action_context'")) {
+      return this.rows(this.events.filter(event => event.event_type !== 'action_context.retrieved' && Boolean((event.metadata as Record<string, unknown>)?.action_context)));
+    }
+    if (text.includes('FROM events')) {
+      return this.rows(this.events.filter(event => event.event_type !== 'action_context.retrieved'));
+    }
+    if (text.includes('FROM contacts') && text.includes('id = ANY')) return this.rows([this.contact]);
+    if (text.includes('FROM accounts') && text.includes('id = ANY')) return this.rows([this.account]);
+    if (text.includes('FROM opportunities') && text.includes('id = ANY')) return this.rows([this.opportunity]);
+    if (text.includes('FROM use_cases')) return this.rows([]);
 
     throw new Error(`SeededActiveContextDb unexpected query: ${text}`);
   }
@@ -1451,6 +1601,32 @@ function missingActionContextContractFields(actionContext: ActionContext): strin
     missing.push('next_tools top-level mirror');
   }
   return missing;
+}
+
+const ACTION_CONTEXT_STABLE_CONTRACT_FIELDS: Array<keyof ActionContext> = [
+  'contract_version',
+  'operating_mode',
+  'readiness',
+  'policy',
+  'source_posture',
+  'allowed_actions',
+  'human_unblock',
+  'proof',
+  'next_tools',
+  'context_packing',
+];
+
+function contractFieldCategory(value: unknown): string {
+  if (value === undefined || value === null) return 'optional';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
+function actionContextContractShape(actionContext: ActionContext): Record<string, string> {
+  return Object.fromEntries(ACTION_CONTEXT_STABLE_CONTRACT_FIELDS.map(field => [
+    field,
+    field === 'human_unblock' ? 'optional' : contractFieldCategory(actionContext[field]),
+  ]));
 }
 
 async function runRetrievalQualitySuite(): Promise<EvalCaseSummary[]> {
@@ -1618,6 +1794,186 @@ async function runSourceAttributionSuite(): Promise<EvalCaseSummary[]> {
   }
 }
 
+async function runConnectorCertificationSuite(): Promise<EvalCaseSummary[]> {
+  const parityDb = new SeededActiveContextDb({ includeWritebackRequest: true });
+  const conflictDb = new SeededActiveContextDb({ includeOpenConflict: true });
+  const results: EvalCaseSummary[] = [];
+
+  try {
+    const connectorFreeActionContext = await getActionContext(parityDb as never, seededActor(), {
+      subject_type: 'contact',
+      subject_id: SEED_CONTACT_ID,
+      context_radius: 'direct',
+      token_budget_profile: 'standard',
+      evidence_mode: 'summary',
+      proposed_action: { action_type: 'customer_outreach' },
+    });
+    const mockSorActionContext = await getActionContext(parityDb as never, seededActor(), {
+      subject_type: 'contact',
+      subject_id: SEED_CONTACT_ID,
+      context_radius: 'direct',
+      token_budget_profile: 'standard',
+      evidence_mode: 'summary',
+      proposed_action: {
+        action_type: 'external_writeback',
+        object_type: 'contact',
+        system_id: SEED_SYSTEM_ID,
+        mapping_id: SEED_MAPPING_ID,
+        external_object: 'Contact',
+        field_names: ['title'],
+        payload: { title: 'VP Revenue' },
+      },
+    });
+    const preview = await previewExternalWriteback(parityDb as never, TENANT_ID, {
+      system_id: SEED_SYSTEM_ID,
+      mapping_id: SEED_MAPPING_ID,
+      object_type: 'contact',
+      external_object: 'Contact',
+      external_record_id: 'hs-contact-1',
+      operation: 'update',
+      writeback_mode: 'mapped_upsert',
+      payload: { title: 'VP Revenue' },
+    });
+    const lineage = await getContextLineage(parityDb as never, TENANT_ID, {
+      subject_type: 'contact',
+      subject_id: SEED_CONTACT_ID,
+    });
+
+    const connectorFreeShape = actionContextContractShape(connectorFreeActionContext);
+    const mockSorShape = actionContextContractShape(mockSorActionContext);
+    const lineageRetrievals = lineage.summary.retrievals ?? 0;
+    const lineageMemory = lineage.summary.memory ?? 0;
+    const lineageWritebacks = lineage.summary.writebacks ?? 0;
+    const missing = [
+      ...missingActionContextContractFields(connectorFreeActionContext).map(item => `connector-free ${item}`),
+      ...missingActionContextContractFields(mockSorActionContext).map(item => `mock-SoR ${item}`),
+    ];
+    if (JSON.stringify(connectorFreeShape) !== JSON.stringify(mockSorShape)) missing.push('identical Action Context contract shape');
+    if (preview.allowed !== true) missing.push('mock SoR preview allowed for writable field');
+    if (preview.requires_approval !== true) missing.push('mock SoR preview requires approval for external-authoritative mapping');
+    if (lineageRetrievals < 2) missing.push('lineage includes connector-free and mock-SoR Action Context retrievals');
+    if (lineageMemory < 1) missing.push('lineage includes Memory nodes');
+    if (lineageWritebacks < 1) missing.push('lineage includes governed writeback node');
+
+    results.push(caseResult({
+      id: 'seeded_connector_free_mock_sor_parity',
+      suite: 'connector_certification',
+      title: 'Connector-free and mocked SoR flows share the same Action Context contract',
+      missing,
+      expected: {
+        flow: 'resolve -> briefing -> action_context -> writeback-preview -> lineage',
+        contract_version: ACTION_CONTEXT_PACKET_VERSION,
+        preview_requires_approval: true,
+      },
+      observed: {
+        connector_free_contract_shape: connectorFreeShape,
+        mock_sor_contract_shape: mockSorShape,
+        mock_sor_preview: {
+          allowed: preview.allowed,
+          requires_approval: preview.requires_approval,
+          source_authority: preview.policy.source_authority,
+          action_policy_decision: preview.policy.action_policy.decision,
+        },
+        lineage_summary: lineage.summary,
+      },
+      scores: {
+        connector_contract_parity: scoreBoolean(missingActionContextContractFields(connectorFreeActionContext).length === 0
+          && missingActionContextContractFields(mockSorActionContext).length === 0
+          && JSON.stringify(connectorFreeShape) === JSON.stringify(mockSorShape)),
+        writeback_preview_policy_accuracy: scoreBoolean(preview.allowed === true && preview.requires_approval === true),
+        lineage_parity_receipt_coverage: scoreBoolean(lineageRetrievals >= 2 && lineageMemory >= 1 && lineageWritebacks >= 1),
+      },
+    }));
+  } catch (err) {
+    results.push(caseResult({
+      id: 'seeded_connector_free_mock_sor_parity',
+      suite: 'connector_certification',
+      title: 'Connector-free and mocked SoR flows share the same Action Context contract',
+      error: err,
+    }));
+  }
+
+  try {
+    const actionContext = await getActionContext(conflictDb as never, seededActor(), {
+      subject_type: 'contact',
+      subject_id: SEED_CONTACT_ID,
+      context_radius: 'direct',
+      token_budget_profile: 'standard',
+      evidence_mode: 'summary',
+      emit_retrieval_event: false,
+      proposed_action: {
+        action_type: 'external_writeback',
+        object_type: 'contact',
+        system_id: SEED_SYSTEM_ID,
+        mapping_id: SEED_MAPPING_ID,
+        external_object: 'Contact',
+        field_names: ['title'],
+        payload: { title: 'Chief Revenue Officer' },
+      },
+    });
+    const readonlyPreview = await previewExternalWriteback(conflictDb as never, TENANT_ID, {
+      system_id: SEED_SYSTEM_ID,
+      mapping_id: SEED_READONLY_MAPPING_ID,
+      object_type: 'contact',
+      external_object: 'Contact',
+      external_record_id: 'hs-contact-1',
+      operation: 'update',
+      writeback_mode: 'mapped_upsert',
+      payload: { email: 'maya@northstar.example' },
+    });
+
+    const missing: string[] = [];
+    const forbidden: string[] = [];
+    if (actionContext.checks.systems_of_record.open_conflict_count < 1) missing.push('open mapped-field source conflict');
+    if (!actionContext.required_handoffs.some(handoff => handoff.type === 'source_conflict')) missing.push('source conflict handoff');
+    if (!actionContext.readiness.review_required) missing.push('review required before conflicting mapped-field write');
+    if (readonlyPreview.allowed !== false) forbidden.push('read-only writeback preview allowed');
+    if (!readonlyPreview.warnings.some(warning => /read-only/i.test(warning) || /not writable/i.test(warning))) {
+      missing.push('read-only/not-writable warning');
+    }
+
+    results.push(caseResult({
+      id: 'seeded_sor_conflict_defers',
+      suite: 'connector_certification',
+      title: 'Mapped SoR conflicts defer instead of overwriting field values',
+      missing,
+      forbidden,
+      expected: {
+        open_conflict_count: 1,
+        review_required: true,
+        readonly_writeback_allowed: false,
+      },
+      observed: {
+        operating_mode: actionContext.operating_mode,
+        systems_of_record: actionContext.checks.systems_of_record,
+        required_handoffs: actionContext.required_handoffs,
+        readonly_preview: {
+          allowed: readonlyPreview.allowed,
+          requires_approval: readonlyPreview.requires_approval,
+          warnings: readonlyPreview.warnings,
+          source_authority: readonlyPreview.policy.source_authority,
+        },
+      },
+      scores: {
+        sor_conflict_deferral: scoreBoolean(actionContext.checks.systems_of_record.open_conflict_count >= 1
+          && actionContext.readiness.review_required
+          && actionContext.required_handoffs.some(handoff => handoff.type === 'source_conflict')),
+        readonly_writeback_false_allow: readonlyPreview.allowed ? 1 : 0,
+        source_authority_neutrality: scoreBoolean(readonlyPreview.policy.source_authority === 'read_only'),
+      },
+    }));
+  } catch (err) {
+    results.push(caseResult({
+      id: 'seeded_sor_conflict_defers',
+      suite: 'connector_certification',
+      title: 'Mapped SoR conflicts defer instead of overwriting field values',
+      error: err,
+    }));
+  }
+
+  return results;
+}
+
 function defaultAgentConfig(): AgentConfig {
   return {
     id: 'eval-agent-config',
@@ -1768,6 +2124,7 @@ async function caseCountForSuite(name: EvalSuiteName): Promise<number> {
   if (name === 'retrieval_quality') return 1;
   if (name === 'action_context') return 1;
   if (name === 'source_attribution') return 1;
+  if (name === 'connector_certification') return 2;
   if (name === 'tool_choice') return 2;
   if (name === 'agent_trajectory') return 1;
   return 0;
@@ -1815,7 +2172,7 @@ function thresholdPassed(actual: number | undefined, threshold: EvalThreshold): 
 }
 
 function higherIsBetterMetric(metric: string): boolean {
-  return !metric.endsWith('_count') && !/^unsafe_.*_allowed$/.test(metric);
+  return !metric.endsWith('_count') && !metric.endsWith('_false_allow') && !/^unsafe_.*_allowed$/.test(metric);
 }
 
 function profileForRun(options: RunEvalOptions): EvalRunProfile {
@@ -1843,6 +2200,8 @@ async function runSuite(suite: EvalSuiteName, options: RunEvalOptions): Promise<
       return runActionContextSuite();
     case 'source_attribution':
       return runSourceAttributionSuite();
+    case 'connector_certification':
+      return runConnectorCertificationSuite();
     case 'tool_choice':
       return runToolChoiceSuite(options);
     case 'agent_trajectory':
