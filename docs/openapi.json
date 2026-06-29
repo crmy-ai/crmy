@@ -1884,6 +1884,81 @@
           "requires_human_review"
         ]
       },
+      "ActionContextPolicySummary": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allowed",
+              "approval_required",
+              "blocked",
+              "draft_only"
+            ]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "required_approval": {
+            "type": "boolean"
+          },
+          "required_evidence": {
+            "type": "boolean"
+          },
+          "risk_level": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "policy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "reasons",
+          "risk_level",
+          "policy"
+        ]
+      },
+      "ActionContextPacking": {
+        "type": "object",
+        "properties": {
+          "token_budget_profile": {
+            "type": "string",
+            "enum": [
+              "tiny",
+              "standard",
+              "deep",
+              "evidence_heavy"
+            ]
+          },
+          "token_budget": {
+            "type": "integer"
+          },
+          "evidence_mode": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "full",
+              "none"
+            ]
+          },
+          "ranking_strategy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_mode",
+          "ranking_strategy"
+        ]
+      },
       "ActionContextActionPacket": {
         "type": "object",
         "properties": {
@@ -2072,6 +2147,12 @@
           "action_context": {
             "type": "object",
             "properties": {
+              "contract_version": {
+                "type": "string",
+                "enum": [
+                  "crmy.action_context.v1"
+                ]
+              },
               "subject_type": {
                 "type": "string",
                 "enum": [
@@ -2194,6 +2275,52 @@
                   "additionalProperties": {}
                 }
               },
+              "policy": {
+                "$ref": "#/components/schemas/ActionContextPolicySummary"
+              },
+              "source_posture": {
+                "$ref": "#/components/schemas/ActionContextSourcePosture"
+              },
+              "human_unblock": {
+                "type": "object",
+                "properties": {
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "question": {
+                    "type": "string"
+                  },
+                  "reasons": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "handoff_type": {
+                    "type": "string",
+                    "enum": [
+                      "assignment",
+                      "signal_review",
+                      "policy_approval",
+                      "source_conflict"
+                    ]
+                  }
+                },
+                "required": [
+                  "required",
+                  "question",
+                  "reasons"
+                ]
+              },
+              "next_tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "context_packing": {
+                "$ref": "#/components/schemas/ActionContextPacking"
+              },
               "required_handoffs": {
                 "type": "array",
                 "items": {
@@ -2207,6 +2334,7 @@
               }
             },
             "required": [
+              "contract_version",
               "subject_type",
               "subject_id",
               "generated_at",
@@ -2217,6 +2345,9 @@
               "readiness",
               "checks",
               "allowed_actions",
+              "source_posture",
+              "next_tools",
+              "context_packing",
               "required_handoffs",
               "proof"
             ]

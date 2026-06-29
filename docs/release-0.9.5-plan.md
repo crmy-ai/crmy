@@ -2,8 +2,8 @@
 
 ## Status
 
-WS1 checkpoint implemented; WS2, WS3, and WS4 implemented in stacked checkpoints;
-WS5-WS7 not started. This is the next milestone after 0.9.4 and the largest single step
+WS1 checkpoint implemented; WS2, WS3, WS4, WS5, and WS6 implemented in stacked
+checkpoints; WS7 not started. This is the next milestone after 0.9.4 and the largest single step
 toward a 1.0 production release. It is the
 authoritative development plan for 0.9.5; the
 [0.8–1.0 roadmap](roadmap-0.8-1.0.md) tracks the broader sequence and the
@@ -280,6 +280,18 @@ Automations are absent from the default path.
 ---
 
 ### WS6 — Portable, versioned Action Context contract (Gap 4)
+
+**Status:** Implemented in the WS6 checkpoint. Action Context now returns
+`contract_version: "crmy.action_context.v1"` plus the frozen preflight fields
+(`operating_mode`, `readiness`, `policy`, `source_posture`, `allowed_actions`,
+`human_unblock`, `proof`, `next_tools`, and `context_packing`) at the portable
+top level while preserving the richer `action_packet`, `briefing`, and `checks`
+surfaces. REST/OpenAPI, MCP metadata, CLI human/JSON output, receipts, and
+Workspace Agent service consumers all use the same versioned packet. The
+`action_context` seeded eval now gates `contract_shape_accuracy = 1`,
+operating-mode accuracy, and `high_risk_false_allow = 0`.
+
+**Deviation:** none.
 
 **Deliverables:**
 

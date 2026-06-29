@@ -417,6 +417,22 @@ const actionContextRecommendedAction = registry.register('ActionContextRecommend
   proposed_action_type: actionContextProposedActionType.optional(),
 }));
 
+const actionContextPolicySummary = registry.register('ActionContextPolicySummary', z.object({
+  decision: z.enum(['allowed', 'approval_required', 'blocked', 'draft_only']),
+  reasons: z.array(z.string()),
+  required_approval: z.boolean().optional(),
+  required_evidence: z.boolean().optional(),
+  risk_level: actionContextRiskLevel,
+  policy: z.string(),
+}));
+
+const actionContextPacking = registry.register('ActionContextPacking', z.object({
+  token_budget_profile: z.enum(['tiny', 'standard', 'deep', 'evidence_heavy']).optional(),
+  token_budget: z.number().int().optional(),
+  evidence_mode: z.enum(['summary', 'full', 'none']),
+  ranking_strategy: z.string(),
+}));
+
 const actionContextActionPacket = registry.register('ActionContextActionPacket', z.object({
   version: z.literal('crmy.action_context.v1'),
   action_type: actionContextProposedActionType.optional(),
@@ -448,6 +464,7 @@ const actionContextActionPacket = registry.register('ActionContextActionPacket',
 }));
 
 const actionContextShape = z.object({
+  contract_version: z.literal('crmy.action_context.v1'),
   subject_type: S.subjectType,
   subject_id: S.uuid,
   generated_at: z.string(),
@@ -470,6 +487,16 @@ const actionContextShape = z.object({
   }),
   checks: z.record(z.unknown()),
   allowed_actions: z.array(z.record(z.unknown())),
+  policy: actionContextPolicySummary.optional(),
+  source_posture: actionContextSourcePosture,
+  human_unblock: z.object({
+    required: z.boolean(),
+    question: z.string(),
+    reasons: z.array(z.string()),
+    handoff_type: z.enum(['assignment', 'signal_review', 'policy_approval', 'source_conflict']).optional(),
+  }).optional(),
+  next_tools: z.array(z.string()),
+  context_packing: actionContextPacking,
   required_handoffs: z.array(z.record(z.unknown())),
   proof: z.record(z.unknown()),
 });

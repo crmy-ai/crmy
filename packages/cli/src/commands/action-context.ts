@@ -30,9 +30,11 @@ function parseJsonObject(value?: string): Record<string, unknown> | undefined {
 }
 
 interface ActionContextPrintData {
+  contract_version?: string;
   operating_mode?: string;
   readiness?: { status?: string; risk_level?: string; review_required?: boolean };
   action_packet?: {
+    version?: string;
     objective?: string;
     agent_instructions?: string[];
     use_as_truth?: Array<{ title?: string; summary?: string }>;
@@ -125,6 +127,7 @@ export function actionContextCommand(): Command {
           return;
         }
 
+        console.log(`Contract: ${data.contract_version ?? data.action_packet?.version ?? 'unknown'}`);
         console.log(`Operating mode: ${data.operating_mode ?? 'unknown'}`);
         console.log(`Readiness: ${data.readiness?.status ?? 'unknown'} (${data.readiness?.risk_level ?? 'unknown'} risk)`);
         console.log(`Review required: ${data.readiness?.review_required ? 'yes' : 'no'}`);

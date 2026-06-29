@@ -1178,40 +1178,46 @@ export async function getActionContext(
     ? { ...derived.checks, knowledge: knowledgeCheck }
     : derived.checks;
 
-  const actionContext: ActionContext = {
-    subject_type: input.subject_type,
-    subject_id: input.subject_id,
-    generated_at: new Date().toISOString(),
+  const proof: ActionContext['proof'] = {
+    used_context_entry_ids: usedContextEntryIds,
+    used_signal_group_ids: usedSignalGroupIds,
+    ...(usedKnowledgeSnippetIds.length ? { used_knowledge_snippet_ids: usedKnowledgeSnippetIds } : {}),
+    ...(knowledgeReceiptIds.length ? { knowledge_retrieval_receipt_ids: knowledgeReceiptIds } : {}),
+    expected_receipts: unique(expectedReceipts),
+  };
+  const actionPacket = buildActionPacket({
     operating_mode: derived.operating_mode,
     guidance: derived.guidance,
-    action_packet: buildActionPacket({
-      operating_mode: derived.operating_mode,
-      guidance: derived.guidance,
-      briefing,
-      readiness: derived.readiness,
-      checks,
-      allowed_actions: allowedActions,
-      required_handoffs: derived.required_handoffs,
-      proof: {
-        used_context_entry_ids: usedContextEntryIds,
-        used_signal_group_ids: usedSignalGroupIds,
-        ...(usedKnowledgeSnippetIds.length ? { used_knowledge_snippet_ids: usedKnowledgeSnippetIds } : {}),
-        ...(knowledgeReceiptIds.length ? { knowledge_retrieval_receipt_ids: knowledgeReceiptIds } : {}),
-        expected_receipts: unique(expectedReceipts),
-      },
-    }, input.proposed_action),
     briefing,
     readiness: derived.readiness,
     checks,
     allowed_actions: allowedActions,
     required_handoffs: derived.required_handoffs,
-    proof: {
-      used_context_entry_ids: usedContextEntryIds,
-      used_signal_group_ids: usedSignalGroupIds,
-      ...(usedKnowledgeSnippetIds.length ? { used_knowledge_snippet_ids: usedKnowledgeSnippetIds } : {}),
-      ...(knowledgeReceiptIds.length ? { knowledge_retrieval_receipt_ids: knowledgeReceiptIds } : {}),
-      expected_receipts: unique(expectedReceipts),
+    proof,
+  }, input.proposed_action);
+
+  const actionContext: ActionContext = {
+    contract_version: ACTION_CONTEXT_PACKET_VERSION,
+    subject_type: input.subject_type,
+    subject_id: input.subject_id,
+    generated_at: new Date().toISOString(),
+    operating_mode: derived.operating_mode,
+    guidance: derived.guidance,
+    action_packet: actionPacket,
+    briefing,
+    readiness: derived.readiness,
+    checks,
+    allowed_actions: allowedActions,
+    ...(checks.policy ? { policy: checks.policy } : {}),
+    source_posture: actionPacket.source_posture,
+    ...(actionPacket.human_unblock ? { human_unblock: actionPacket.human_unblock } : {}),
+    next_tools: actionPacket.next_tools,
+    context_packing: briefing.context_packing ?? {
+      evidence_mode: input.evidence_mode ?? 'summary',
+      ranking_strategy: 'confidence_decay_type_priority_evidence_boost',
     },
+    required_handoffs: derived.required_handoffs,
+    proof,
   };
 
   if (input.emit_retrieval_event !== false) {
@@ -1223,6 +1229,7 @@ export async function getActionContext(
       objectType: input.subject_type,
       objectId: input.subject_id,
       afterData: {
+        contract_version: actionContext.contract_version,
         readiness_status: actionContext.readiness.status,
         operating_mode: actionContext.operating_mode,
         review_required: actionContext.readiness.review_required,
@@ -1239,6 +1246,7 @@ export async function getActionContext(
         origin: 'action_context',
         context_radius: input.context_radius ?? 'direct',
         token_budget: input.token_budget,
+        contract_version: actionContext.contract_version,
         proposed_action_type: input.proposed_action?.action_type,
         used_context_entry_ids: usedContextEntryIds,
         used_signal_group_ids: usedSignalGroupIds,
@@ -1289,6 +1297,7 @@ export async function verifiedActionContextMetadataForReceipt(
   return {
     subject_type: subjectType,
     subject_id: subjectId,
+    contract_version: eventMetadata?.contract_version ?? afterData?.contract_version,
     operating_mode: eventMetadata?.operating_mode ?? afterData?.operating_mode,
     readiness_status: eventMetadata?.readiness_status ?? afterData?.readiness_status,
     risk_level: eventMetadata?.risk_level ?? afterData?.risk_level,
