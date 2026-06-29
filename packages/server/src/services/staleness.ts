@@ -28,6 +28,7 @@ interface StaleEntryRow {
   title: string | null;
   body: string;
   valid_until: string;
+  claim_tier: number | null;
 }
 
 export function computeMemoryIdsDueForReview(
@@ -97,14 +98,17 @@ export async function processStaleEntriesForTenant(
   }
 
   const result = await db.query(
-    `SELECT id, tenant_id, subject_type, subject_id, context_type,
-            authored_by, title, body, valid_until
-     FROM context_entries
-     WHERE tenant_id = $1
-       AND valid_until < now()
-       AND is_current = true
-       AND memory_status = 'active'
-     ORDER BY valid_until ASC
+    `SELECT c.id, c.tenant_id, c.subject_type, c.subject_id, c.context_type,
+            c.authored_by, c.title, c.body, c.valid_until, ctr.claim_tier
+     FROM context_entries c
+     LEFT JOIN context_type_registry ctr
+       ON ctr.tenant_id = c.tenant_id
+      AND ctr.type_name = c.context_type
+     WHERE c.tenant_id = $1
+       AND c.valid_until < now()
+       AND c.is_current = true
+       AND c.memory_status = 'active'
+     ORDER BY c.valid_until ASC
      LIMIT $2`,
     [tenantId, limit],
   );
@@ -140,6 +144,7 @@ export async function processStaleEntriesForTenant(
       reasons: ['stale_memory'],
       contextEntryId: entry.id,
       contextType: entry.context_type,
+      claimTier: entry.claim_tier,
     });
 
     if (result.created) created++;
@@ -154,14 +159,19 @@ export async function processStaleEntriesForTenant(
  */
 export async function processStaleEntries(db: DbPool, limit = 10): Promise<void> {
   const tenantsResult = await db.query(
-    `SELECT DISTINCT tenant_id FROM context_entries
-     WHERE is_current = true
-       AND memory_status = 'active'
+    `SELECT DISTINCT c.tenant_id
+     FROM context_entries c
+     LEFT JOIN context_type_registry ctr
+       ON ctr.tenant_id = c.tenant_id
+      AND ctr.type_name = c.context_type
+     WHERE c.is_current = true
+       AND c.memory_status = 'active'
        AND (
-         valid_until < now()
+         c.valid_until < now()
          OR (
-           valid_until IS NULL
-           AND COALESCE(reviewed_at, promoted_at, updated_at, created_at) < now() - interval '30 days'
+           c.valid_until IS NULL
+           AND COALESCE(c.reviewed_at, c.promoted_at, c.updated_at, c.created_at)
+             < now() - (COALESCE(ctr.default_freshness_days, 120) * interval '1 day')
          )
        )
      LIMIT 50`,

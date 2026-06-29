@@ -4179,6 +4179,15 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.patch('/context-types/:type_name', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_type_update');
+      const result = await handler({ ...req.body, type_name: p(req, 'type_name') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   router.delete('/context-types/:type_name', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);

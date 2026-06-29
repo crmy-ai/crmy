@@ -6,8 +6,9 @@ import { validationError } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
 import * as assignmentRepo from '../db/repos/assignments.js';
 import * as contextRepo from '../db/repos/context-entries.js';
+import * as contextTypeRepo from '../db/repos/context-type-registry.js';
 import { emitEvent } from '../events/emitter.js';
-import { memoryClaimTier, memoryFreshnessWindowDays } from './memory-trust.js';
+import { memoryClaimTier, memoryClaimTierForSettings, memoryFreshnessWindowDays } from './memory-trust.js';
 
 export const REVIEW_ASSIGNMENT_TYPES = [
   'stale_context_review',
@@ -76,6 +77,11 @@ function tierFor(assignment: Pick<Assignment, 'assignment_type' | 'metadata'>): 
   return memoryClaimTier(contextTypeFor(assignment));
 }
 
+function configuredTier(value: unknown): 0 | 1 | 2 | undefined {
+  const tier = numberValue(value);
+  return tier === 0 || tier === 1 || tier === 2 ? tier : undefined;
+}
+
 function riskScore(assignment: Assignment): number {
   const metadata = metadataFor(assignment);
   const risk = String(metadata.risk_level ?? metadata.review_risk ?? '').toLowerCase();
@@ -133,6 +139,7 @@ function reviewMetadata(input: {
   reasons?: string[];
   contextEntryId?: UUID | string;
   contextType?: string;
+  claimTier?: number | null;
   subjectType?: SubjectType | string | null;
   subjectId?: UUID | string | null;
   knowledgeClaimId?: UUID | string;
@@ -147,7 +154,7 @@ function reviewMetadata(input: {
   }
   if (input.contextType) {
     metadata.context_type = input.contextType;
-    metadata.memory_claim_tier = memoryClaimTier(input.contextType);
+    metadata.memory_claim_tier = configuredTier(input.claimTier) ?? memoryClaimTier(input.contextType);
   }
   if (input.subjectType) metadata.review_subject_type = input.subjectType;
   if (input.subjectId) metadata.review_subject_id = input.subjectId;
@@ -262,6 +269,7 @@ export async function createOrConsolidateReviewAssignment(
     reasons?: string[];
     contextEntryId?: UUID | string;
     contextType?: string;
+    claimTier?: number | null;
     knowledgeClaimId?: UUID | string;
     contradictionKey?: string;
     capPerSubject?: number;
@@ -273,6 +281,7 @@ export async function createOrConsolidateReviewAssignment(
     reasons: options.reasons,
     contextEntryId: options.contextEntryId,
     contextType: options.contextType,
+    claimTier: options.claimTier,
     subjectType: data.subject_type,
     subjectId: data.subject_id,
     knowledgeClaimId: options.knowledgeClaimId,
@@ -497,6 +506,7 @@ export function agentReviewResolutionPolicy(input: {
   assignment: Pick<Assignment, 'assignment_type' | 'metadata'>;
   entry: ContextEntry;
   openConflictCount?: number;
+  claimTier?: number | null;
 }): { allowed: boolean; reason?: string } {
   if (!isReviewAssignmentType(input.assignment.assignment_type)) {
     return { allowed: false, reason: 'Only review assignments can be resolved through this tool.' };
@@ -504,7 +514,7 @@ export function agentReviewResolutionPolicy(input: {
   if (input.assignment.assignment_type === 'contradiction_review') {
     return { allowed: false, reason: 'Contradiction reviews need explicit human or contradiction-resolution handling.' };
   }
-  if (memoryClaimTier(input.entry.context_type) === 2) {
+  if ((input.claimTier ?? memoryClaimTier(input.entry.context_type)) === 2) {
     return { allowed: false, reason: 'Tier-2 Memory reviews remain human-only.' };
   }
   if ((input.openConflictCount ?? 0) > 0) {
@@ -561,14 +571,16 @@ export async function resolveLowRiskReviewAssignment(
   const entry = await contextRepo.getContextEntry(db, tenantId as UUID, contextEntryId);
   if (!entry) throw validationError('The linked Memory entry was not found.');
   const openConflictCount = await countOpenConflictsForContextEntry(db, tenantId, contextEntryId);
-  const policy = agentReviewResolutionPolicy({ assignment, entry, openConflictCount });
+  const trustSettings = await contextTypeRepo.getTypeTrustSettings(db, tenantId as UUID, entry.context_type);
+  const claimTier = memoryClaimTierForSettings(entry.context_type, trustSettings);
+  const policy = agentReviewResolutionPolicy({ assignment, entry, openConflictCount, claimTier });
   if (!policy.allowed) throw validationError(policy.reason ?? 'This review assignment cannot be resolved automatically.');
 
   const reviewed = await contextRepo.reviewContextEntry(
     db,
     tenantId as UUID,
     contextEntryId,
-    extendDays ?? memoryFreshnessWindowDays(entry.context_type),
+    extendDays ?? memoryFreshnessWindowDays(entry.context_type, trustSettings),
   );
   if (!reviewed) throw validationError('The linked Memory entry could not be marked reviewed.');
 
@@ -587,7 +599,7 @@ export async function resolveLowRiskReviewAssignment(
     metadata: {
       agent_resolved_review: true,
       context_entry_id: reviewed.id,
-      memory_claim_tier: memoryClaimTier(reviewed.context_type),
+      memory_claim_tier: claimTier,
     },
   });
 

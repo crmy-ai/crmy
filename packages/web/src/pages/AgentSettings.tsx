@@ -149,6 +149,7 @@ export default function AgentSettings() {
   const [autoExtractContext,  setAutoExtractContext]  = useState(true);
   const [autoPromoteSignals,  setAutoPromoteSignals]  = useState(true);
   const [signalPromotionThreshold, setSignalPromotionThreshold] = useState(0.85);
+  const [tier2AutopromotePolicy, setTier2AutopromotePolicy] = useState<'corroborated' | 'human_only'>('corroborated');
   const [signalSourceQuality, setSignalSourceQuality] = useState(DEFAULT_SIGNAL_SOURCE_QUALITY);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -192,6 +193,7 @@ export default function AgentSettings() {
     setAutoExtractContext(config.auto_extract_context !== false); // default true
     setAutoPromoteSignals(config.auto_promote_signals !== false);
     setSignalPromotionThreshold(Number(config.signal_auto_promote_threshold ?? 0.85));
+    setTier2AutopromotePolicy(config.tier2_autopromote_policy ?? 'corroborated');
     setSignalSourceQuality(normalizeSourceQualitySettings(config.signal_source_quality));
   }, [config]);
 
@@ -280,6 +282,7 @@ export default function AgentSettings() {
       auto_extract_context:   autoExtractContext,
       auto_promote_signals:   autoPromoteSignals,
       signal_auto_promote_threshold: signalPromotionThreshold,
+      tier2_autopromote_policy: tier2AutopromotePolicy,
       signal_source_quality: signalSourceQuality,
       backup_enabled:        backupEnabled,
       backup_provider:       backupProvider,
@@ -1180,6 +1183,36 @@ export default function AgentSettings() {
                 </div>
                 <div className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
                   Readiness scores combine extracted confidence, source quality, supporting evidence, independent sources, conflicts, and the model certification gate. Items below this threshold stay as Signals unless a user confirms them or sends them to Handoff.
+                </div>
+                <div className="rounded-lg border border-border bg-card p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-foreground">Tier-2 policy</p>
+                      <p className="text-xs text-muted-foreground">High-impact Memory can stay review-only or allow independent corroboration.</p>
+                    </div>
+                    <Select
+                      value={tier2AutopromotePolicy}
+                      onValueChange={async (value) => {
+                        const policy = value as 'corroborated' | 'human_only';
+                        const previous = tier2AutopromotePolicy;
+                        setTier2AutopromotePolicy(policy);
+                        try {
+                          await saveConfig.mutateAsync({ tier2_autopromote_policy: policy });
+                        } catch {
+                          setTier2AutopromotePolicy(previous);
+                          toast({ title: 'Failed to save Tier-2 policy', variant: 'destructive' });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-40 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="corroborated">Corroborated</SelectItem>
+                        <SelectItem value="human_only">Human only</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <details className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
                   <summary className="cursor-pointer font-semibold text-foreground">Source quality for Signal readiness</summary>

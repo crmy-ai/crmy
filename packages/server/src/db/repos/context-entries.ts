@@ -649,6 +649,7 @@ export interface MemoryFreshnessCandidateRow {
   promoted_at: string | null;
   updated_at: string | null;
   created_at: string | null;
+  default_freshness_days: number | null;
 }
 
 export async function listActiveMemoryForFreshness(
@@ -657,14 +658,19 @@ export async function listActiveMemoryForFreshness(
   limit = 500,
 ): Promise<MemoryFreshnessCandidateRow[]> {
   const result = await db.query(
-    `SELECT id, context_type, valid_until, reviewed_at, promoted_at, updated_at, created_at
-     FROM context_entries
-     WHERE tenant_id = $1
-       AND is_current = TRUE
-       AND memory_status = 'active'
-       AND valid_until IS NULL
-       AND COALESCE(reviewed_at, promoted_at, updated_at, created_at) < now() - interval '30 days'
-     ORDER BY COALESCE(reviewed_at, promoted_at, updated_at, created_at) ASC
+    `SELECT c.id, c.context_type, c.valid_until, c.reviewed_at, c.promoted_at,
+            c.updated_at, c.created_at, ctr.default_freshness_days
+     FROM context_entries c
+     LEFT JOIN context_type_registry ctr
+       ON ctr.tenant_id = c.tenant_id
+      AND ctr.type_name = c.context_type
+     WHERE c.tenant_id = $1
+       AND c.is_current = TRUE
+       AND c.memory_status = 'active'
+       AND c.valid_until IS NULL
+       AND COALESCE(c.reviewed_at, c.promoted_at, c.updated_at, c.created_at)
+         < now() - (COALESCE(ctr.default_freshness_days, 120) * interval '1 day')
+     ORDER BY COALESCE(c.reviewed_at, c.promoted_at, c.updated_at, c.created_at) ASC
      LIMIT $2`,
     [tenantId, limit],
   );

@@ -245,6 +245,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   activity_type_add: ['write'],
   activity_type_remove: ['write'],
   context_type_add: ['write'],
+  context_type_update: ['write'],
   context_type_remove: ['write'],
 
   // ── Actors ──

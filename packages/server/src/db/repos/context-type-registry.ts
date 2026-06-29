@@ -3,6 +3,12 @@
 
 import type { DbPool } from '../pool.js';
 import type { ContextTypeRegistryEntry, UUID } from '@crmy/shared';
+import {
+  memoryClaimTierForSettings,
+  memoryFreshnessWindowDays,
+  normalizeMemoryClaimTier,
+  type ContextTypeTrustSettings,
+} from '../../services/memory-trust.js';
 
 // ── Template definitions ────────────────────────────────────────────────────
 // Each extractable type has:
@@ -10,10 +16,12 @@ import type { ContextTypeRegistryEntry, UUID } from '@crmy/shared';
 //   extraction_prompt — Short instruction added to the extraction prompt for this type
 //   is_extractable    — Whether the extraction pipeline should produce this type
 
-interface ContextTypeTemplate extends Omit<ContextTypeRegistryEntry, 'tenant_id' | 'created_at'> {
+interface ContextTypeTemplate extends Omit<ContextTypeRegistryEntry, 'tenant_id' | 'created_at' | 'default_freshness_days' | 'claim_tier'> {
   json_schema?: Record<string, unknown>;
   extraction_prompt?: string;
   is_extractable: boolean;
+  default_freshness_days?: number;
+  claim_tier?: 0 | 1 | 2;
 }
 
 export const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
@@ -473,13 +481,30 @@ export const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
 
 // ── DB functions ─────────────────────────────────────────────────────────────
 
+function defaultFreshnessDaysFor(input: {
+  type_name: string;
+  default_freshness_days?: number | null;
+}): number {
+  return memoryFreshnessWindowDays(input.type_name, {
+    default_freshness_days: input.default_freshness_days,
+  });
+}
+
+function claimTierFor(input: {
+  type_name: string;
+  claim_tier?: number | null;
+}): 0 | 1 | 2 {
+  return normalizeMemoryClaimTier(input.claim_tier, input.type_name);
+}
+
 export async function seedDefaults(db: DbPool, tenantId: UUID): Promise<void> {
   for (const entry of DEFAULT_CONTEXT_TYPES) {
     await db.query(
       `INSERT INTO context_type_registry
        (type_name, tenant_id, label, description, is_default, json_schema,
-        extraction_prompt, is_extractable, priority_weight, confidence_half_life_days)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        extraction_prompt, is_extractable, priority_weight, confidence_half_life_days,
+        default_freshness_days, claim_tier)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (tenant_id, type_name) DO UPDATE SET
          label                     = EXCLUDED.label,
          description               = EXCLUDED.description,
@@ -487,7 +512,9 @@ export async function seedDefaults(db: DbPool, tenantId: UUID): Promise<void> {
          extraction_prompt         = EXCLUDED.extraction_prompt,
          is_extractable            = EXCLUDED.is_extractable,
          priority_weight           = EXCLUDED.priority_weight,
-         confidence_half_life_days = EXCLUDED.confidence_half_life_days`,
+         confidence_half_life_days = EXCLUDED.confidence_half_life_days,
+         default_freshness_days    = EXCLUDED.default_freshness_days,
+         claim_tier                = EXCLUDED.claim_tier`,
       [
         entry.type_name,
         tenantId,
@@ -499,6 +526,8 @@ export async function seedDefaults(db: DbPool, tenantId: UUID): Promise<void> {
         entry.is_extractable,
         entry.priority_weight,
         entry.confidence_half_life_days ?? null,
+        defaultFreshnessDaysFor(entry),
+        claimTierFor(entry),
       ],
     );
   }
@@ -509,8 +538,9 @@ export async function ensureDefaultContextTypes(db: DbPool, tenantId: UUID): Pro
     await db.query(
       `INSERT INTO context_type_registry
        (type_name, tenant_id, label, description, is_default, json_schema,
-        extraction_prompt, is_extractable, priority_weight, confidence_half_life_days)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        extraction_prompt, is_extractable, priority_weight, confidence_half_life_days,
+        default_freshness_days, claim_tier)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (tenant_id, type_name) DO NOTHING`,
       [
         entry.type_name,
@@ -523,6 +553,8 @@ export async function ensureDefaultContextTypes(db: DbPool, tenantId: UUID): Pro
         entry.is_extractable,
         entry.priority_weight,
         entry.confidence_half_life_days ?? null,
+        defaultFreshnessDaysFor(entry),
+        claimTierFor(entry),
       ],
     );
   }
@@ -596,13 +628,16 @@ export async function addContextType(
     is_extractable?: boolean;
     priority_weight?: number;
     confidence_half_life_days?: number | null;
+    default_freshness_days?: number | null;
+    claim_tier?: number | null;
   },
 ): Promise<ContextTypeRegistryEntry> {
   const result = await db.query(
     `INSERT INTO context_type_registry
        (type_name, tenant_id, label, description, is_default, json_schema,
-        extraction_prompt, is_extractable, priority_weight, confidence_half_life_days)
-     VALUES ($1, $2, $3, $4, FALSE, $5, $6, $7, $8, $9)
+        extraction_prompt, is_extractable, priority_weight, confidence_half_life_days,
+        default_freshness_days, claim_tier)
+     VALUES ($1, $2, $3, $4, FALSE, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
       data.type_name,
@@ -614,9 +649,74 @@ export async function addContextType(
       data.is_extractable ?? false,
       data.priority_weight ?? 1.0,
       data.confidence_half_life_days ?? null,
+      defaultFreshnessDaysFor(data),
+      claimTierFor(data),
     ],
   );
   return result.rows[0] as ContextTypeRegistryEntry;
+}
+
+export interface UpdateContextTypeInput {
+  label?: string;
+  description?: string | null;
+  json_schema?: Record<string, unknown> | null;
+  extraction_prompt?: string | null;
+  is_extractable?: boolean;
+  priority_weight?: number;
+  confidence_half_life_days?: number | null;
+  default_freshness_days?: number | null;
+  claim_tier?: number | null;
+}
+
+export async function updateContextType(
+  db: DbPool,
+  tenantId: UUID,
+  typeName: string,
+  data: UpdateContextTypeInput,
+): Promise<ContextTypeRegistryEntry | null> {
+  const assignments: string[] = [];
+  const values: unknown[] = [tenantId, typeName];
+  let idx = 3;
+  const setField = (field: string, value: unknown) => {
+    assignments.push(`${field} = $${idx++}`);
+    values.push(value);
+  };
+
+  if (data.label !== undefined) setField('label', data.label);
+  if (data.description !== undefined) setField('description', data.description);
+  if (data.json_schema !== undefined) {
+    setField('json_schema', data.json_schema === null ? null : JSON.stringify(data.json_schema));
+  }
+  if (data.extraction_prompt !== undefined) setField('extraction_prompt', data.extraction_prompt);
+  if (data.is_extractable !== undefined) setField('is_extractable', data.is_extractable);
+  if (data.priority_weight !== undefined) setField('priority_weight', data.priority_weight);
+  if (data.confidence_half_life_days !== undefined) setField('confidence_half_life_days', data.confidence_half_life_days);
+  if (data.default_freshness_days !== undefined) {
+    setField('default_freshness_days', defaultFreshnessDaysFor({
+      type_name: typeName,
+      default_freshness_days: data.default_freshness_days,
+    }));
+  }
+  if (data.claim_tier !== undefined) {
+    setField('claim_tier', claimTierFor({ type_name: typeName, claim_tier: data.claim_tier }));
+  }
+
+  if (assignments.length === 0) {
+    const result = await db.query(
+      'SELECT * FROM context_type_registry WHERE tenant_id = $1 AND type_name = $2',
+      [tenantId, typeName],
+    );
+    return (result.rows[0] as ContextTypeRegistryEntry | undefined) ?? null;
+  }
+
+  const result = await db.query(
+    `UPDATE context_type_registry
+     SET ${assignments.join(', ')}
+     WHERE tenant_id = $1 AND type_name = $2
+     RETURNING *`,
+    values,
+  );
+  return (result.rows[0] as ContextTypeRegistryEntry | undefined) ?? null;
 }
 
 /**
@@ -637,6 +737,45 @@ export async function getTypeWeightsMap(
     map.set(row.type_name, {
       priority_weight: row.priority_weight ?? 1.0,
       confidence_half_life_days: row.confidence_half_life_days ?? null,
+    });
+  }
+  return map;
+}
+
+export async function getTypeTrustSettings(
+  db: DbPool,
+  tenantId: UUID,
+  typeName: string,
+): Promise<ContextTypeTrustSettings | null> {
+  const result = await db.query(
+    `SELECT type_name, default_freshness_days, claim_tier
+     FROM context_type_registry
+     WHERE tenant_id = $1 AND type_name = $2`,
+    [tenantId, typeName],
+  );
+  const row = result.rows[0] as ({ type_name: string } & ContextTypeTrustSettings) | undefined;
+  if (!row) return null;
+  return {
+    default_freshness_days: memoryFreshnessWindowDays(row.type_name, row),
+    claim_tier: memoryClaimTierForSettings(row.type_name, row),
+  };
+}
+
+export async function getTypeTrustSettingsMap(
+  db: DbPool,
+  tenantId: UUID,
+): Promise<Map<string, ContextTypeTrustSettings>> {
+  const result = await db.query(
+    `SELECT type_name, default_freshness_days, claim_tier
+     FROM context_type_registry
+     WHERE tenant_id = $1`,
+    [tenantId],
+  );
+  const map = new Map<string, ContextTypeTrustSettings>();
+  for (const row of result.rows as Array<{ type_name: string } & ContextTypeTrustSettings>) {
+    map.set(row.type_name, {
+      default_freshness_days: memoryFreshnessWindowDays(row.type_name, row),
+      claim_tier: memoryClaimTierForSettings(row.type_name, row),
     });
   }
   return map;

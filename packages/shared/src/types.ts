@@ -994,6 +994,10 @@ export interface ContextTypeRegistryEntry {
   priority_weight: number;
   /** Half-life in days for confidence decay. null = no decay. */
   confidence_half_life_days: number | null;
+  /** Default review window in days for undated Current Memory of this type. */
+  default_freshness_days: number;
+  /** Promotion risk tier: 0 = informational, 1 = operational, 2 = high-impact. */
+  claim_tier: 0 | 1 | 2;
   /** Whether this type is checked for contradictions with other entries of the same type. */
   is_contradiction_eligible?: boolean;
   created_at: string;

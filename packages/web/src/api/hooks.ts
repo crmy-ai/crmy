@@ -2147,8 +2147,32 @@ export function useContextTypes() {
 export function useCreateContextType() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { type_name: string; label: string; description?: string }) =>
+    mutationFn: (data: {
+      type_name: string;
+      label: string;
+      description?: string;
+      default_freshness_days?: number;
+      claim_tier?: 0 | 1 | 2;
+    }) =>
       api.post('context-types', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['context-types'] }),
+  });
+}
+export function useUpdateContextType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      type_name: string;
+      label?: string;
+      description?: string | null;
+      priority_weight?: number;
+      confidence_half_life_days?: number | null;
+      default_freshness_days?: number;
+      claim_tier?: 0 | 1 | 2;
+    }) => {
+      const { type_name, ...data } = input;
+      return api.patch(`context-types/${type_name}`, data);
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['context-types'] }),
   });
 }
@@ -2474,6 +2498,7 @@ export interface AgentConfigData {
   auto_extract_context: boolean;
   auto_promote_signals: boolean;
   signal_auto_promote_threshold: number;
+  tier2_autopromote_policy: 'corroborated' | 'human_only';
   signal_source_quality?: Record<string, number>;
   backup_enabled: boolean;
   backup_provider: ProviderId | null;

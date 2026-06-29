@@ -38,6 +38,7 @@ import { createContradictionReviewAssignments } from '../../services/context-rev
 import { assertActionPolicyAllowsMutation, evaluateActionPolicy } from '../../services/action-policy.js';
 import { attachSignalToGroup, completeSignalGroupDetails, createSignalGroupHandoff, dismissSignalGroup, promoteSignalGroup } from '../../services/signal-groups.js';
 import { completeOpenReviewAssignmentsForContextEntry } from '../../services/review-queue.js';
+import { memoryFreshnessWindowDays } from '../../services/memory-trust.js';
 import { withSignalReadiness } from '../../services/signal-readiness.js';
 import { ensureActorRecordForContext, resolveActorRecordId } from '../../services/actor-identity.js';
 import { assertActivityAccess, assertSubjectAccess, resolveOwnerFilter } from '../../services/access-control.js';
@@ -1118,7 +1119,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_review',
       tier: 'admin',
-      description: 'Mark Memory as reviewed and still accurate. Resets reviewed_at to now and optionally extends valid_until by extend_days days (default: type half-life or 30 days). Use this after verifying Memory is still correct — it returns the entry to Current Memory and prevents the review system from re-queuing it immediately.',
+      description: 'Mark Memory as reviewed and still accurate. Resets reviewed_at to now and optionally extends valid_until by extend_days days (default: the context type freshness window). Use this after verifying Memory is still correct — it returns the entry to Current Memory and prevents the review system from re-queuing it immediately.',
       inputSchema: contextReview,
       handler: async (input: z.infer<typeof contextReview>, actor: ActorContext) => {
         return runIdempotent(db, {
@@ -1131,14 +1132,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         const existing = await contextRepo.getContextEntry(db, actor.tenant_id, input.id);
         if (!existing) throw notFound('ContextEntry', input.id);
         await assertSubjectAccess(db, actor, existing.subject_type as SubjectType, existing.subject_id);
-        // Determine extend_days: use provided value, fall back to type half_life, then 30
+        // Determine extend_days: use provided value, then the governed type freshness window.
         let extendDays = input.extend_days;
         if (!extendDays) {
-          const typeRow = await db.query(
-            'SELECT confidence_half_life_days FROM context_type_registry WHERE tenant_id = $1 AND type_name = (SELECT context_type FROM context_entries WHERE id = $2)',
-            [actor.tenant_id, input.id],
-          );
-          extendDays = typeRow.rows[0]?.confidence_half_life_days ?? 30;
+          const trustSettings = await contextTypeRepo.getTypeTrustSettings(db, actor.tenant_id, existing.context_type);
+          extendDays = trustSettings?.default_freshness_days ?? memoryFreshnessWindowDays(existing.context_type);
         }
         const entry = await contextRepo.reviewContextEntry(db, actor.tenant_id, input.id, extendDays);
         if (!entry) throw notFound('ContextEntry', input.id);

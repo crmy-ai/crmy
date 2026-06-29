@@ -2627,6 +2627,15 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'patch', path: '/context-types/{type_name}',
+  tags: ['Registries'],
+  summary: 'Update context type trust settings',
+  security: bearer,
+  request: { params: z.object({ type_name: z.string() }), body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
   method: 'delete', path: '/context-types/{type_name}',
   tags: ['Registries'],
   summary: 'Remove a custom context type',
