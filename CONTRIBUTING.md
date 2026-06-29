@@ -4,7 +4,7 @@ Thanks for your interest in contributing to CRMy! This guide will help you get o
 
 ## What CRMy needs most from contributors
 
-CRMy's differentiator is the core context engine — the trust boundary between agents and customer systems: messy customer source material becomes Signals, source-grounded Memory, scoped briefings, governed Handoffs, writeback receipts, and audit/Lineage. The highest-value community contributions are the ones that prove this loop under real-world conditions.
+CRMy's differentiator is the governance and provenance layer between agents and customer systems: messy customer source material becomes Signals, source-grounded Memory, Action Context, governed Handoffs, writeback receipts, and audit/Lineage. The highest-value community contributions are the ones that prove this loop under real-world conditions.
 
 The most useful contributions right now are:
 
@@ -14,9 +14,9 @@ The most useful contributions right now are:
 4. **Record-resolution edge cases**: subsidiaries, aliases, shared domains, duplicate contact first names, same opportunity names under different accounts, stale CRM records, and partial transcript references.
 5. **Agent harness QA** for Claude Code, Claude Desktop, Codex, ChatGPT Developer Mode, Hermes, OpenClaw, and other MCP-capable environments.
 6. **Operational recovery tests** for failed extraction, retryable Source processing, stuck agent turns, sync drift, writeback failures, and scoped-access denials.
-7. **Eval cases and suites** for the local eval harness (`crmy eval run`): labeled extraction corpora, record-resolution edge cases, retrieval-quality and tool-choice cases, and Action Context decisions — so model and prompt changes are measurable, not anecdotal.
+7. **Eval cases and suites** for the local eval harness (`crmy eval run`): labeled extraction corpora, record-resolution edge cases, retrieval-quality and tool-choice cases, Action Context decisions, model-certification cases, and Tier-2 auto-promotion gates — so model and prompt changes are measurable, not anecdotal.
 
-Feature ideas are welcome, but for the 0.9 line we prefer contributions that make the existing engine more reliable, measurable, and boring in production.
+Feature ideas are welcome, but for the 0.9 line we prefer contributions that make the existing trust machinery more reliable, measurable, and boring in production.
 
 ### How to report real-world test results
 
@@ -48,7 +48,7 @@ CRMy is a TypeScript monorepo with the following packages:
 
 The engine should keep clear boundaries between source material, inferred claims, confirmed customer context, model-visible working context, governed action, and proof. When adding features or changing behavior, preserve these guardrails:
 
-1. **Keep lifecycle states distinct.** Sources are captured source material before extraction. Signals are inferred claims with evidence and readiness. Memory is confirmed operational customer context. Active Context is temporary model-visible context assembled for an agent turn. Handoffs, writebacks, receipts, and audit events record governed action.
+1. **Keep lifecycle states distinct.** Sources are captured source material before extraction. Signals are inferred claims with evidence and readiness. Memory is confirmed operational customer context. Active Context is temporary model-visible context assembled for an agent turn. Action Context is the preflight contract that tells the agent what is safe now, what is blocked, which policy applies, and what proof will be recorded. Handoffs, writebacks, receipts, and audit events record governed action.
 2. **Validate at every external boundary.** REST payloads, MCP tool input, webhooks, provider responses, CRM/warehouse sync data, email/calendar data, file extraction output, and LLM output enter as runtime data. Parse and validate them at the edge before passing domain-shaped values deeper into the engine.
 3. **Scope every operation.** Reads and writes must remain tenant-scoped and actor-scoped. UI visibility is not enough; REST handlers, MCP tools, services, repositories, background workers, and workflow actions must preserve `tenant_id`, actor role, owner visibility, and tool scopes.
 4. **Keep API and tool contracts stable.** REST, CLI, MCP, and web UI surfaces can share behavior, but each boundary should expose explicit input/output contracts. Do not leak provider quirks, SQL rows, private IDs, or internal retry state into user-facing contracts unless the contract is specifically for operators.
@@ -56,7 +56,9 @@ The engine should keep clear boundaries between source material, inferred claims
 6. **Keep provider details in adapters.** LLM providers, embedding providers, email providers, calendar providers, CRMs, warehouses, and OpenAI-compatible gateways should normalize into CRMy shapes before the core engine consumes them.
 7. **Govern external writes.** System-of-record changes need preview, allowed-field checks, source-authority checks, approval when required, idempotency, execution receipts, and audit events. Workflow or agent convenience should not bypass this path.
 8. **Preserve Lineage.** If a feature creates, changes, dismisses, supersedes, or writes customer context, keep enough source references, evidence, receipt data, and audit metadata for an operator to reconstruct what happened.
-9. **Avoid boundary collapse.** A function that validates loose input, checks auth, runs SQL, calls a provider, mutates external systems, and formats UI output is doing too much. Split edge parsing, domain decisions, persistence, provider adapters, and presentation into separate units.
+9. **Do not weaken Memory gates.** Automatic Memory requires grounding, trust-tier policy, readiness, and model certification. Unknown or uncertified models should degrade to review-only. Tier-2/high-impact claims must either go to human review or meet the corroborated policy: independent recent grounded sources and no readiness blockers.
+10. **Avoid boundary collapse.** A function that validates loose input, checks auth, runs SQL, calls a provider, mutates external systems, and formats UI output is doing too much. Split edge parsing, domain decisions, persistence, provider adapters, and presentation into separate units.
+11. **Use honest product language.** CRMy should be described as provenance-checked, decay-aware governance for customer context. Avoid user-facing claims that imply permanent truth, magic knowledge-graph reasoning, or sales performance improvements that are not backed by an outcome-learning loop.
 
 ### MCP tools
 
@@ -68,9 +70,11 @@ MCP tool definitions live in `packages/server/src/mcp/tools/`. Each tool file ex
 - **`inputSchema`** — a Zod schema for input validation
 - **`handler`** — receives parsed input + `ActorContext` and returns a result object
 
-Tool files include `context-entries.ts`, `subject-graph.ts`, `actors.ts`, `activities.ts`, `assignments.ts`, `hitl.ts`, `contacts.ts`, `accounts.ts`, `opportunities.ts`, `analytics.ts`, `use-cases.ts`, `registries.ts`, `notes.ts`, `workflows.ts`, `webhooks.ts`, `email.ts`, `email-sequences.ts`, `calendar.ts`, `systems-of-record.ts`, `custom-fields.ts`, and `meta.ts`.
+Tool files include focused domains such as `context-entries.ts`, `context-source-drops.ts`, `action-context.ts`, `guide.ts`, `knowledge.ts`, `record-drafts.ts`, `systems-of-record.ts`, `subject-graph.ts`, `actors.ts`, `activities.ts`, `assignments.ts`, `hitl.ts`, `contacts.ts`, `accounts.ts`, `opportunities.ts`, `analytics.ts`, `use-cases.ts`, `registries.ts`, `workflows.ts`, `webhooks.ts`, `email.ts`, `email-sequences.ts`, `calendar.ts`, `custom-fields.ts`, and `meta.ts`.
 
-Tool ordering in the manifest (defined in `packages/server/src/mcp/server.ts`) matters — tools listed first are more likely to be selected by the LLM. Briefing and context tools come first.
+Tool ordering in the manifest (defined in `packages/server/src/mcp/server.ts`) matters — tools listed first are more likely to be selected by the LLM. Briefing, Action Context, guide, and context tools come first. Keep tool descriptions model-facing and test any new tool with `crmy tools describe <tool_name>`.
+
+CRMy also has session toolsets/core profiles. Toolsets reduce the tool catalog for a job; they must never widen actor scope or bypass the governor. When adding tools, update the relevant toolset metadata and guide copy so agents can discover the right path without seeing the entire catalog.
 
 ### SQL migrations
 
@@ -83,17 +87,20 @@ Key migrations to be aware of when developing:
 | Range | Area |
 |---|---|
 | 001–020 | Core schema (contacts, accounts, opportunities, activities, actors, assignments, context) |
-| 021–030 | Context Engine v2 (pgvector, extraction pipeline, types registry, auto-extract flag) |
+| 021–030 | Context and Memory v2 (pgvector, extraction pipeline, types registry, auto-extract flag) |
 | 031–039 | Automation engine (workflows, sequences, HITL, email sequences) |
 | 040–049 | Automation performance, idempotency, recovery, auth lifecycle, and Systems of Record |
 | 050–059 | Signal groups, scoped actors, pgvector/Lineage, durable agent turns, and Customer Email |
 | 060–068 | Email drafts, calendar meetings, source filters, Source recovery, scale indexes, extraction attempts, and replay payloads |
+| 069–079 | Agent provider resilience, trust/source-quality settings, tenant guards, rate limits, and MCP session catalog |
+| 080–089 | Email delivery, OAuth apps, account domains, context source drops, webhooks, product Knowledge, and source connections |
+| 090–094 | Memory trust integrity, model certification, freshness indexes, Tier-2 auto-promotion policy, and type-level trust settings |
 
-### Web UI pages (18)
+### Web UI pages
 
 Pages live in `packages/web/src/pages/`. CRM drawer components live in `packages/web/src/components/crm/`. The app uses React Router, TanStack Query for data fetching, Zustand for state, and Tailwind CSS + Framer Motion for styling/animation.
 
-### CLI commands (30+)
+### CLI commands
 
 All commands live in `packages/cli/src/commands/` and are registered in `packages/cli/src/index.ts`. The CLI uses Commander.js for command parsing and Inquirer.js for interactive prompts.
 
@@ -117,10 +124,10 @@ npm run build
 docker compose -f docker/docker-compose.yml up db -d
 
 # Run the setup wizard — handles DB creation, migrations, admin account, demo data
-npx @crmy/cli init
+npx -y @crmy/cli init --demo
 
 # Start the dev server
-npx @crmy/cli server
+npx -y @crmy/cli server
 ```
 
 ### Alternative: manual setup
@@ -176,15 +183,25 @@ npm run dev:web      # Web UI only (port 5173, needs API server running)
 ### Verify your setup
 
 ```bash
-npx @crmy/cli doctor     # 8-point diagnostic check
-npm run build             # verify TypeScript compiles cleanly
-npm test                  # run test suite
+npx -y @crmy/cli doctor       # actionable diagnostic checks
+npx -y @crmy/cli quickstart   # seeded end-to-end agent proof
+npm run build                 # verify TypeScript compiles cleanly
+npm run lint                  # strict type checks without emitting files
+npm test                      # core Node test suite
 ```
+
+If you choose a custom or local model, automatic Memory remains review-only until the model is certified. Run:
+
+```bash
+npx -y @crmy/cli certify --output ./eval-runs
+```
+
+This executes the live model certification suite and only turns on automatic Memory if the gate passes. Pre-certified recommended models restore their recorded certification during guided setup when the exact provider/base URL/model identity matches.
 
 ### Connect Claude Code to local dev server
 
 ```bash
-claude mcp add crmy -- npx @crmy/cli mcp
+claude mcp add crmy -- npx -y @crmy/cli mcp
 ```
 
 ## Key commands for development
@@ -195,12 +212,17 @@ claude mcp add crmy -- npx @crmy/cli mcp
 | `npm run dev` | Start API server + web UI with hot reload (requires `DATABASE_URL` + `JWT_SECRET`) |
 | `npm run dev:server` | Start API server only (port 3000) |
 | `npm run dev:web` | Start Vite web UI only (port 5173, proxies to :3000) |
-| `npm test` | Run test suite (vitest) |
+| `npm test` | Run the core Node test suite |
+| `npm run test:cli-coverage` | Check CLI surface coverage metadata |
 | `npm run lint` | TypeScript type checking (`tsc --noEmit`) |
-| `npx @crmy/cli doctor` | Diagnose setup issues |
-| `npx @crmy/cli seed-demo` | Seed demo data (idempotent) |
-| `npx @crmy/cli seed-demo --reset` | Drop and re-seed demo data |
-| `npx @crmy/cli migrate status` | Show applied vs pending migrations |
+| `npx -y @crmy/cli doctor` | Diagnose setup issues with guided next steps |
+| `npx -y @crmy/cli quickstart` | Prove seeded demo data and the core agent path |
+| `npx -y @crmy/cli seed-demo` | Seed demo data (idempotent) |
+| `npx -y @crmy/cli seed-demo --reset` | Drop and re-seed demo data |
+| `npx -y @crmy/cli migrate status` | Show applied vs pending migrations |
+| `npx -y @crmy/cli models list` | Show provider/model catalog entries |
+| `npx -y @crmy/cli certify --output ./eval-runs` | Certify the configured live model for automatic Memory |
+| `npx -y @crmy/cli eval run --profile seeded_context` | Run the deterministic seeded eval gate |
 
 ## Spec-driven development model
 
@@ -212,7 +234,7 @@ CRMy is built iteratively via versioned spec files passed to Claude Code (Opus).
 2. **Add a realistic fixture** to the Source extraction or record-resolution corpus
 3. **Report a `briefing_get` bug** with a specific customer scenario and expected context
 4. **Add a `crmy doctor` check** for something that catches new contributors off guard
-5. **Improve CLI or MCP error messages** for setup, auth, extraction, or scoped-access failures
+5. **Improve CLI or MCP error messages** for setup, auth, extraction, certification, review-only mode, or scoped-access failures
 6. **Add a connector/writeback smoke test** for HubSpot, Salesforce, a warehouse, or a custom API/MCP integration
 7. **Add or improve a recipe** in `docs/recipes/` or an agent harness example in `examples/`
 8. **Add a `context_type`, activity type, or meeting classification** to the registry seed data when it reflects methodology-neutral GTM Memory
@@ -262,26 +284,26 @@ crmy/
 │   ├── shared/          TypeScript types + Zod schemas
 │   ├── server/
 │   │   ├── src/
-│   │   │   ├── mcp/tools/     175+ MCP tool definitions (18 files)
+│   │   │   ├── mcp/tools/     MCP tool definitions grouped by domain
 │   │   │   ├── rest/          REST API router (all endpoints)
 │   │   │   ├── db/            Pool, migrations, repositories
 │   │   │   │   └── repos/     One repo per entity (context-entries, activities, etc.)
 │   │   │   ├── auth/          JWT + API key auth
 │   │   │   ├── agent/         AI extraction pipeline (extraction.ts, providers/llm.ts)
-│   │   │   ├── services/      Briefing, sequence-executor, HITL handler
+│   │   │   ├── services/      Briefing, Action Context, Memory trust, Knowledge, HITL, evals
 │   │   │   ├── workflows/     Event-driven automation engine
 │   │   │   ├── lib/           Shared utilities (file-extract, workflow-templates, etc.)
 │   │   │   └── index.ts       Server entry point + createApp()
-│   │   └── migrations/        42+ SQL migration files
+│   │   └── migrations/        Numbered SQL migration files
 │   ├── cli/
-│   │   └── src/commands/      30+ CLI commands (init, server, doctor, etc.)
+│   │   └── src/commands/      CLI commands (init, server, doctor, certify, eval, etc.)
 │   └── web/
 │       └── src/
-│           ├── pages/         20+ page components
-│           ├── components/crm/ Editor error boundary, context panel, workflow/sequence editors
+│           ├── pages/         App page components
+│           ├── components/crm/ Shared CRM, context, Knowledge, and governance UI
 │           └── api/hooks.ts   TanStack Query hooks
 ├── docker/                    Dockerfile + docker-compose.yml
-├── docs/recipes/              3 agent tutorial walkthroughs
+├── docs/recipes/              Agent workflow recipes
 ├── scripts/                   Seed + migration scripts
 ├── railway.toml               Railway deploy template
 ├── render.yaml                Render.com deploy blueprint

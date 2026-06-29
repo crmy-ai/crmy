@@ -2,7 +2,7 @@
 
 An agent that runs after a sales or customer-success call. It turns a messy transcript into evidence-backed Signals, promotes confirmed items to Memory, routes uncertain or risky claims to Handoffs, and creates clear follow-up work.
 
-**What you will build:** A post-meeting processing workflow that uses CRMy as the context engine, not a hand-written parser.
+**What you will build:** A post-meeting processing workflow that uses CRMy as the provenance and governance layer, not a hand-written parser.
 
 **Prerequisites:**
 
@@ -11,7 +11,7 @@ An agent that runs after a sales or customer-success call. It turns a messy tran
 - MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
 - Optional: inspect exact tool inputs with `crmy tools describe <tool_name>`
 
-**Context engine capabilities used:** `actor_whoami`, `briefing_get`, `context_ingest_auto`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `assignment_create`, and `hitl_submit_request`.
+**CRMy capabilities used:** `actor_whoami`, `briefing_get`, `context_ingest_auto`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `assignment_create`, and `hitl_submit_request`.
 
 ---
 
@@ -28,7 +28,7 @@ Sources -> Signals -> Memory -> Active Context -> Handoffs -> Systems of Record.
 Definitions:
 - Sources are messy input: transcripts, emails, meeting notes, support updates, research, and CRM/warehouse changes.
 - Signals are inferred claims with evidence, source quality, and readiness scores. They are useful, but not confirmed Memory.
-- Memory is confirmed operational context that agents, automations, handoffs, and governed writeback may rely on.
+- Memory is confirmed operational context that agents, Handoffs, Action Context, and governed writeback may rely on.
 - Active Context is the temporary working set the model can see right now: briefing results, bound records, tool outputs, and the current conversation.
 - Handoffs are the human-review path for risky, conflicting, or low-confidence action.
 
@@ -210,7 +210,7 @@ context_signal_group_promote {
 crmy context promote-group <signal-id>
 ```
 
-After promotion, the claim is Current Memory and will appear in `briefing_get`, context search, Automations, Handoffs, and governed writeback planning.
+After promotion, the claim is Current Memory and will appear in `briefing_get`, context search, Action Context, Handoffs, and governed writeback planning.
 
 ---
 

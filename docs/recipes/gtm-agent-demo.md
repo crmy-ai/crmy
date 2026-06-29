@@ -130,4 +130,4 @@ From here, an agent can:
 - request a governed writeback to a connected CRM or warehouse
 - create a Handoff before forecast, executive outreach, or external-system updates
 
-CRMy's value is not just remembering context. It tells agents what is true enough to act on, what needs review, and what can safely move back to a system of record.
+CRMy's value is not just remembering context. It tells agents what is source-grounded and policy-ready, what needs review, and what can safely move back to a system of record.

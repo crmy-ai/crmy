@@ -27,6 +27,7 @@ Expected behavior:
 2. If demo data is loaded, Northstar Labs should be the strongest account match.
 3. If the meeting cannot be matched confidently to a calendar event, the object stays reviewable instead of disappearing.
 4. Resolving the source object should create or attach a meeting artifact, then feed Sources -> Signals -> Memory with lineage back to the source object.
-5. Because this transcript contains both internal and customer speakers, downstream context should be treated as mixed-source evidence, not purely customer-authored truth.
+5. Because this transcript contains both internal and customer speakers, downstream context should be treated as mixed-source evidence, not purely customer-authored fact.
+6. If the configured model is uncertified, extracted claims should remain reviewable Signals until a human reviews them or `crmy certify --output ./eval-runs` passes for that exact model.
 
 For S3-compatible testing, upload both files with the same basename to an S3-compatible test bucket prefix and create an S3 transcript source that points at that prefix.

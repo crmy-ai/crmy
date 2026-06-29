@@ -11,7 +11,7 @@ An agent that keeps customer memory current and evidence-backed. It reviews stal
 - Optional: inspect exact tool inputs with `crmy tools describe <tool_name>`
 - Optional: pgvector and embeddings for `context_semantic_search`
 
-**Context engine capabilities used:** `context_stale`, `context_review_batch`, `context_detect_contradictions`, `context_contradiction_assign`, `context_consolidate`, `context_semantic_search`, `briefing_get`, and `assignment_create`.
+**CRMy capabilities used:** `context_stale`, `context_review_batch`, `context_detect_contradictions`, `context_contradiction_assign`, `context_consolidate`, `context_semantic_search`, `briefing_get`, and `assignment_create`.
 
 ---
 

@@ -13,7 +13,7 @@ This recipe treats `briefing_get` as the retrieval step: it loads persistent Mem
 - Optional: inspect exact tool inputs with `crmy tools describe <tool_name>`
 - pgvector and embeddings enabled for semantic search, or use the keyword fallback shown below
 
-**Context engine capabilities used:** `briefing_get`, `context_semantic_search`, `context_search`, `context_detect_contradictions`, `activity_create`, `context_ingest_auto`, `context_signal_group_list`, `context_signal_group_promote`, `context_signal_handoff`, `assignment_create`, and `hitl_submit_request`.
+**CRMy capabilities used:** `briefing_get`, `context_semantic_search`, `context_search`, `context_detect_contradictions`, `activity_create`, `context_ingest_auto`, `context_signal_group_list`, `context_signal_group_promote`, `context_signal_handoff`, `assignment_create`, and `hitl_submit_request`.
 
 ---
 

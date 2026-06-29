@@ -24,6 +24,7 @@ npx -y @crmy/cli tools describe context_signal_group_list
 - [Codex account briefing](codex-account-briefing/README.md)
 - [Hermes Agent account briefing](hermes-agent-account-briefing/README.md)
 - [OpenClaw plugin account briefing](openclaw-plugin-account-briefing/README.md)
+- [Transcript drop fixture](transcript-drop/README.md)
 
 These examples use the seeded Northstar Labs demo and verify:
 
@@ -33,3 +34,5 @@ These examples use the seeded Northstar Labs demo and verify:
 4. Signals needing attention,
 5. lineage proof,
 6. a safe next action grounded in evidence.
+
+If you swap in a custom or local model, CRMy may create reviewable Signals but keep automatic Memory off until the model passes certification. Run `npx -y @crmy/cli certify --output ./eval-runs` when you want to enable automatic Memory for that model.

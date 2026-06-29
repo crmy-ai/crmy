@@ -12,7 +12,7 @@ The agent should treat the briefing as Active Context: the temporary working set
 - MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
 - Optional: inspect exact tool inputs with `crmy tools describe <tool_name>`
 
-**Context engine capabilities used:** `briefing_get`, `context_semantic_search`, `context_search`, `activity_create`, `hitl_submit_request`, `hitl_check_status`, and `assignment_create`.
+**CRMy capabilities used:** `briefing_get`, `context_semantic_search`, `context_search`, `activity_create`, `hitl_submit_request`, `hitl_check_status`, and `assignment_create`.
 
 ---
 
@@ -302,7 +302,7 @@ Priya explicitly asked whether MCP is proprietary. The outreach should proactive
 
 Brightside is comparing CRMy against HubSpot ($3,600/mo) and Attio ($1,200/mo). Neither has MCP support. The outreach should position the open-source, self-hosted model as the differentiator without directly attacking competitors.
 
-Before drafting, ask the context engine for conceptually related memory. Use semantic search when pgvector and embeddings are enabled, then fall back to keyword search if the server reports `fallback_available: true`.
+Before drafting, ask CRMy for conceptually related Memory. Use semantic search when pgvector and embeddings are enabled, then fall back to keyword search if the server reports `fallback_available: true`.
 
 **MCP tool call:**
 
