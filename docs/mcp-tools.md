@@ -376,18 +376,23 @@ Remove a custom activity type.
 - **Output**: `{ removed: true }`
 
 ### context_type_list
-List all registered context types for the tenant, including `priority_weight` and `confidence_half_life_days`.
+List all registered context types for the tenant, including `priority_weight`, `confidence_half_life_days`, `default_freshness_days`, and `claim_tier`.
 - **Input**: (none)
 - **Output**: `{ context_types }`
 
 ### context_type_add
 Register a custom context type.
-- **Input**: `name` (required, snake_case), `description`, `priority_weight` (default 1.0), `confidence_half_life_days`
+- **Input**: `type_name` (required, snake_case), `label` (required), `description`, `priority_weight` (default 1.0), `confidence_half_life_days`, `default_freshness_days`, `claim_tier` (0, 1, or 2)
+- **Output**: `{ context_type }`
+
+### context_type_update
+Update governed settings for a context type.
+- **Input**: `type_name` (required), plus any of `label`, `description`, `priority_weight`, `confidence_half_life_days`, `default_freshness_days`, `claim_tier`
 - **Output**: `{ context_type }`
 
 ### context_type_remove
 Remove a custom context type (default types cannot be removed).
-- **Input**: `name` (required)
+- **Input**: `type_name` (required)
 - **Output**: `{ removed: true }`
 
 ## Workflow Tools

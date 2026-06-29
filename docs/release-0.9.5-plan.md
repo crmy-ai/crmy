@@ -3,7 +3,11 @@
 ## Status
 
 WS1 checkpoint implemented; WS2, WS3, WS4, WS5, WS6, and WS7 implemented in stacked
-checkpoints. This is the next milestone after 0.9.4 and the largest single step
+checkpoints. Release-acceptance documentation cleanup is implemented: the roadmap,
+guide, MCP tool docs, and eval harness now describe the real customer-Memory
+freshness mechanism, tenant-tunable type settings, and seeded connector parity
+without treating them as future work. This is the next milestone after 0.9.4 and
+the largest single step
 toward a 1.0 production release. It is the
 authoritative development plan for 0.9.5; the
 [0.8–1.0 roadmap](roadmap-0.8-1.0.md) tracks the broader sequence and the
@@ -472,8 +476,8 @@ nothing else needs to be pulled up.
   (`promoteReadyGroup` ~514), `db/repos/context-entries.ts`.
 - Review/staleness sweeps: `packages/server/src/services/staleness.ts`,
   `services/knowledge-governance.ts`, `db/repos/assignments.ts`.
-- Freshness window config target: `db/repos/context-type-registry.ts` +
-  a new migration (next number after 092) adding `default_freshness_days`.
+- Freshness window config: `db/repos/context-type-registry.ts` +
+  migration 094 adding `default_freshness_days` and `claim_tier`.
 - Toolsets / Core Profile: `packages/server/src/mcp/toolsets.ts`
   (`CORE_TOOLS`, `standard`, default selection ~262).
 - Action Context contract: `packages/server/src/services/action-context.ts`,

@@ -1303,6 +1303,7 @@ The Context Engine turns Source into reviewable Signals and Current Memory attac
 - **Supersede chain** — old entries are marked `is_current = false` rather than deleted; new entries point back via `supersedes_id`
 - **Priority weights** — each context type carries a `priority_weight` (0.5–2.0) used when ranking entries in token-budget-aware briefings
 - **Confidence decay** — each type can have a `confidence_half_life_days`; effective confidence decays as `stored_confidence × 0.5^(age / half_life)`, so old intel does not crowd out fresh Memory
+- **Freshness and tier policy** — each context type carries `default_freshness_days` and `claim_tier`, so review windows and promotion risk can be governed per tenant
 
 Memory has a first-class lifecycle:
 
@@ -1350,7 +1351,10 @@ Custom types can be added via the [Type Registries](#type-registries).
 | `agent_reasoning` | 0.6 | — |
 | `transcript` | 0.5 | — |
 
-Custom types default to weight 1.0, no decay.
+The same registry stores the default review window and promotion tier for each
+type. Built-in types are seeded from CRMy's trust defaults; custom types default
+to `priority_weight: 1.0`, `default_freshness_days: 120`, `claim_tier: 0`, and
+no confidence half-life unless an admin overrides them.
 
 ### Key fields
 
@@ -1919,27 +1923,32 @@ crmy activity-types remove partner_call
 
 17 default types: `commitment`, `next_step`, `stakeholder`, `deal_risk`, `competitive_intel`, `objection`, `key_fact`, `note`, `transcript`, `summary`, `research`, `preference`, `sentiment_analysis`, `decision`, `relationship_map`, `meeting_notes`, `agent_reasoning`.
 
-Each type has two additional fields that control how it is prioritized in token-budget-aware briefings:
+Each type has governed fields that control how it is prioritized in briefings,
+when it needs review, and which promotion tier applies:
 
 | Field | Description |
 |---|---|
 | `priority_weight` | Multiplier (default 1.0) applied when scoring entries for briefing packing. Higher = surfaces first. |
 | `confidence_half_life_days` | If set, confidence decays as `stored_confidence × 0.5^(age_days / half_life_days)`. `null` means no decay. |
+| `default_freshness_days` | Default review window used to set or extend `valid_until` for Memory of this type. |
+| `claim_tier` | Promotion risk tier: `0` informational, `1` operational, `2` high-impact. |
 
 #### MCP tools
 
 | Tool | Description |
 |---|---|
 | `context_type_list` | List all registered context types for the tenant |
-| `context_type_add` | Add a custom type. Required: `name` (snake_case). Optional: `description`, `priority_weight`, `confidence_half_life_days` |
-| `context_type_remove` | Remove a custom type by `name` |
+| `context_type_add` | Add a custom type. Required: `type_name` (snake_case), `label`. Optional: `description`, `priority_weight`, `confidence_half_life_days`, `default_freshness_days`, `claim_tier` |
+| `context_type_update` | Update label, description, briefing priority, confidence half-life, default freshness window, or claim tier |
+| `context_type_remove` | Remove a custom type by `type_name` |
 
 #### CLI
 
 ```bash
 crmy context-types list
-crmy context-types add deal_risk
-crmy context-types remove deal_risk
+crmy context-types add expansion_risk --label "Expansion Risk" --freshness-days 45 --claim-tier 2
+crmy context-types update next_step --freshness-days 21 --claim-tier 1
+crmy context-types remove expansion_risk
 ```
 
 ---
@@ -3206,7 +3215,7 @@ Uses the MCP Streamable HTTP transport. Initialization creates an `mcp-session-i
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_health_score`, `opportunity_delete` |
 | Messaging | `message_channel_create`, `message_channel_update`, `message_channel_get`, `message_channel_delete`, `message_channel_list`, `message_send`, `message_delivery_get`, `message_delivery_search` |
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
-| Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
+| Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_update`, `context_type_remove` |
 | Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list`, `workflow_test`, `workflow_clone`, `workflow_trigger`, `workflow_run_replay`, `workflow_template_list` |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_reveal_secret`, `webhook_rotate_secret`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
 | Emails | `email_create`, `email_get`, `email_search`, `mailbox_connection_list`, `mailbox_connection_start`, `email_message_search`, `email_message_get`, `email_message_link`, `email_message_process`, `email_message_ignore`, `email_draft_preview`, `email_draft_save`, `email_ingest`, `email_provider_set`, `email_provider_get` |

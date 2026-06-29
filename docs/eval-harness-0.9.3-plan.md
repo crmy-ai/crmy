@@ -866,10 +866,10 @@ For 0.9.3, database persistence should be optional unless the UI requires it.
 Recommended CI stages:
 
 1. `crmy eval run --profile contract` for fast deterministic corpora, no model and no external services.
-2. `crmy eval run --profile seeded_context` for production briefing/Action Context/source-attribution service behavior against a fixture DB.
+2. `crmy eval run --profile seeded_context` for production briefing/Action Context/source-attribution service behavior and deterministic connector parity against a fixture DB.
 3. `crmy eval run --profile live_model --require-live` for release candidates when provider credentials are configured.
 4. `crmy eval run --profile agent_runtime` for reported tool-choice and trajectory smoke coverage.
-5. Optional live connector certification evals in provider-specific environments when that suite lands.
+5. Optional live connector certification evals in provider-specific environments; deterministic seeded connector parity already runs in `seeded_context`.
 
 Recommended release gates:
 
@@ -984,7 +984,7 @@ Exit criteria:
 Still planned:
 
 - How to create a customer-redacted eval case.
-- How to run connector certification evals.
+- How to run live connector certification evals for provider sandboxes.
 - How to compare eval runs across retrieval settings, models, prompts, and
   tenant configuration.
 - How to promote production failures into reviewed eval cases.

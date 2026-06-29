@@ -70,12 +70,20 @@ These are committed decisions, not options. Each lists the **change** an impleme
 | Tier | Examples | Auto-promote rule |
 |---|---|---|
 | **0 — Informational** | preference, relationship note | Grounded snippet → auto-promote |
-| **1 — Operational** | next_step, pain_point, objection | Grounded **and** (independent corroboration **or** a `valid_until` decay date) |
-| **2 — High-impact** | forecast_signal, commitment, economic-buyer/champion change, deal_risk affecting forecast | **Never auto-promote** — human review **or** ≥2 independent sources + recency |
+| **1 — Operational** | next_step, pain_point, objection | Grounded **and** type-driven freshness/review policy is present |
+| **2 — High-impact** | forecast_signal, commitment, economic-buyer/champion change, deal_risk affecting forecast | Human review, or governed auto-promote only with ≥2 independent sources + recency |
 
-### Fix the decay gap (makes a headline claim actually true)
+### Decay gap status (now implemented)
 
-Today, customer Memory only goes stale if the extraction model emitted a `valid_until` (`extraction.ts` prompt) or a human set a TTL — there is **no automatic, type-based freshness window for customer Memory.** Ironically the optional Trusted Fact layer already has deterministic category windows. **Action:** give customer Memory the same treatment, using `packages/server/src/services/knowledge-freshness.ts` (`freshnessWindowDays`, `computeStaleClaimIds`) as the template, driven by `context_type`. Un-dated Memory must auto-stale by type so `staleness.ts` sweeps and briefing `staleness_warnings` actually fire.
+This gap is closed for the 0.9 line. Customer Memory now gets deterministic,
+type-based review dates through `memoryFreshnessWindowDays`, write-time review
+dates, and the undated Memory sweep. In 0.9.5, WS4 made that policy
+tenant-tunable by moving the default review window onto
+`context_type_registry.default_freshness_days` and storing each type's
+promotion tier in `claim_tier` (migration 094). `valid_until` remains the
+per-entry review marker used by staleness sweeps and briefing warnings; the
+default comes from the governed context type unless the entry carries an
+explicit date.
 
 ### The Core Profile — the smallest valuable product
 
@@ -94,7 +102,7 @@ Everything beyond this loop (SoR connectors, email/calendar sources, Trusted Fac
 | Sources -> Signals -> Memory lifecycle | **Core** | The substrate; differentiated via grounded promotion. |
 | Action Context (`inform`/`warn`/`require_review`) | **Core — lead with it** | Most defensible code; the product. |
 | Lineage + receipts + audit | **Core — the trust brand** | Hard to replicate; survives model-native memory. |
-| Grounded promotion + claim-class tiers (D3) + model gating (D4) + decay windows | **Core — must make true for 1.0** | Closes epistemic-overreach + weak-model + decay risks. |
+| Grounded promotion + claim-class tiers (D3) + model gating (D4) + tunable freshness windows | **Core — implemented and release-gated** | Closes epistemic-overreach + weak-model + stale-context risks. |
 | SoR overlay (Salesforce, HubSpot, warehouse, connector-free) | **Core — as the neutrality moat (D7)** | Two-CRM parity is the gate, not breadth. |
 | Customer Email / Activity / Calendar | **Keep — framed as ingestion sources only** | Feed the loop; not inbox/calendar apps. |
 | HITL / Handoffs | **Keep** | The human-review half of governance. |
@@ -134,9 +142,9 @@ Current release: **0.9.4 (shipped).** Each phase maps to a differentiated mechan
 |---|---|---|---|
 | **0.9.4** ✅ **LANDED** | **Trust integrity** (make the headline claims true) | D3 claim-class tiers in `memory-trust.ts`; `grounding_method` on every Memory row (migration 090); **customer-Memory decay windows** (`memoryFreshnessWindowDays` + write-time review dates + undated sweep); D4 model-certification gate for auto-promote (migration 091) | ✅ Verified in code: tier + certification gates fire on the auto-promote path; un-dated Memory auto-stales by type. **Known follow-up surfaced for 0.9.5:** no automated certification path exists, so production auto-promote is effectively off → handled by 0.9.5 WS1. |
 | **0.9.5** | **Automatic by default** (the big milestone) | See the full **[0.9.5 Development Plan](release-0.9.5-plan.md)**. WS1 eval-driven certification + pre-certified models (fixes the auto-promote dead-end); WS2 self-maintaining review queue; WS3 headless auto-ingestion + reduce-UI audit; WS4 tenant-tunable tiers/freshness (calibration); WS5 Core Profile default + finish Sequences/Automations removal; WS6 versioned Action Context contract (D1/D6); WS7 neutrality-by-construction + parity harness (D2) | Fresh `init --demo` auto-confirms Tier-0/1 grounded Memory with **zero clicks**; golden path needs **zero web-UI interaction**; re-grounding clears reviews; Tier-2 false-allow = 0; contract versioned |
-| **0.9.6** | **Portable, provable contract** | Freeze the Action Context contract surface; universal proof-receipt envelope across retrieval/draft/HITL/writeback/turn; harden D2 SoR-defers-on-conflict | One receipt format audits all action types; contract stable across MCP/REST/CLI/Workspace Agent |
+| **0.9.6** | **Proof receipts + runtime hardening** | Extend the frozen Action Context contract into a universal proof-receipt envelope across retrieval/draft/HITL/writeback/turn; harden cross-surface runtime behavior around the core loop | One receipt format audits all action types; contract consumers stay stable across MCP/REST/CLI/Workspace Agent |
 | **0.9.7** | **Neutrality + the value proof** | D7 **live** two-SoR + connector-free parity (Salesforce + HubSpot); **public benchmark vs naive RAG / model-native memory** (grounded-claim, unsupported-claim, stale-avoidance, unsafe-writeback); D5 outcome-instrumentation substrate (data capture only) | Canonical flow passes identically across SF, HubSpot, and no-connector; benchmark shows measurable safety/accuracy lift over alternatives |
-| **0.9.8** | **Pre-RC hardening** | [Resilience At Scale](#10-resilience-at-scale) **scoped to the core loop** (serverless Postgres budgets, durable sweep queues, scoped search at volume); runtime certification matrix for the 5-tool loop; honesty pass (decay claims now true) | Review queue + sweeps stay bounded at 500k-row tenants; core loop meets latency/correctness budgets |
+| **0.9.8** | **Pre-RC hardening** | [Resilience At Scale](#10-resilience-at-scale) **scoped to the core loop** (serverless Postgres budgets, durable sweep queues, scoped search at volume); runtime certification matrix for the 5-tool loop | Review queue + sweeps stay bounded at 500k-row tenants; core loop meets latency/correctness budgets |
 | **1.0-RC → GA** | **Freeze + soak** | Two-CRM + connector-free + scale soak all green; contract frozen; benchmark published; no overclaimed epistemics in docs | The "what dies / what survives model-native memory" story holds; production-deployable |
 
 ### Explicitly NOT doing before 1.0
@@ -165,7 +173,7 @@ Not storage, not the contract (copyable). It is: (a) the **grounded-promotion + 
 
 - Promotion/grounding: `packages/server/src/agent/extraction-grounding.ts`, extraction prompt in `packages/server/src/agent/extraction.ts`.
 - Readiness/tiers (D3): `packages/server/src/services/signal-readiness.ts`.
-- Decay template (apply to customer Memory): `packages/server/src/services/knowledge-freshness.ts`; sweep in `packages/server/src/services/staleness.ts`; storage in migrations `012`/`013` (`context_entries.valid_until`).
+- Customer Memory freshness: default windows and tiers in `packages/server/src/services/memory-trust.ts`, tenant overrides in `context_type_registry.default_freshness_days` / `claim_tier` (migration 094), sweeps in `packages/server/src/services/staleness.ts`, per-entry review marker in `context_entries.valid_until`.
 - Action Context contract (D1/D6) + SoR authority (D2): `packages/server/src/services/action-context.ts`.
 - Briefing/packing (demote per D6): `packages/server/src/services/briefing.ts`.
 - Toolsets / default catalog (Core Profile, D8): MCP tool registration under `packages/server/src/mcp/tools/` and toolset selection.
@@ -807,24 +815,24 @@ Status: **Foundation landed for 0.9.3; expanding toward 1.0 proof.** See
 plumbing against deterministic corpora. The `seeded_context` profile calls
 production briefing and Action Context services against a fixture DB and scores
 retrieval recall, scope leaks, stale warnings, readiness decisions, unsafe
-writeback allowance, and source attribution safety. The `live_model` profile
-measures extraction quality from messy source text by seeding an eval activity
-DB and calling production `extractContextFromActivity` without
-`modelOutputOverride` when eval model credentials are configured. The
-`agent_runtime` profile reports tool-choice and trajectory smoke scores.
+writeback allowance, source attribution safety, and deterministic connector
+parity. The `live_model` profile measures extraction quality from messy source
+text by seeding an eval activity DB and calling production
+`extractContextFromActivity` without `modelOutputOverride` when eval model
+credentials are configured. The `agent_runtime` profile reports tool-choice and
+trajectory smoke scores.
 
 The remaining 1.0 proof work is breadth and portability: more redacted
 customer-derived cases, embedding/semantic retrieval comparisons, live connector
 certification, model-backed cross-runtime agent trajectories, and public
 benchmark artifacts.
 
-0.9.3 should also add optional governed company, product, solution, pricing,
-implementation, security, compliance, roadmap, and competitive Trusted Fact
-retrieval. Customer Memory remains the core product. Knowledge should be a
-sibling retrieval layer that helps agents connect customer context to safe
-customer-facing Trusted Facts without turning CRMy into a CMS or making
-knowledge required for briefings, Action Context, writeback, or local agent
-workflows.
+Governed company, product, solution, pricing, implementation, security,
+compliance, roadmap, and competitive Trusted Fact retrieval is a sibling layer.
+Customer Memory remains the core product. Knowledge helps agents connect
+customer context to safe customer-facing Trusted Facts without turning CRMy into
+a CMS or making knowledge required for briefings, Action Context, writeback, or
+local agent workflows.
 
 Implemented 0.9.3 foundation:
 
@@ -1063,9 +1071,10 @@ Certification dimensions:
 - skipped-source accounting;
 - scoped-access behavior.
 
-0.9.3 complement:
+0.9 complement:
 
-- Add connector certification as an eval suite category.
+- Seeded connector certification runs as an eval suite category; live
+  provider-specific certification remains the 1.0 production-readiness proof.
 
 1.0 target:
 
