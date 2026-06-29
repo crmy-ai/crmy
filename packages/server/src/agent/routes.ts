@@ -91,7 +91,7 @@ function certificationResponseMeta(config: AgentConfig): Record<string, unknown>
       ? null
       : config.auto_promote_signals === false
         ? 'Automatic Memory is disabled in this workspace.'
-        : 'Run `crmy certify` to enable automatic Memory for this Workspace Agent model. Until then, grounded Signals route to review only.',
+        : 'CRMy will not let an unproven model invent customer truth. Run `crmy certify --output ./eval-runs` to enable automatic Memory for this Workspace Agent model; until then, grounded Signals route to review only.',
   };
 }
 

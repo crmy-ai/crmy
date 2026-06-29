@@ -7,8 +7,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createSpinner } from '../spinner.js';
 import { saveConfigFile } from '../config.js';
+import { providerModelsFromCatalog } from '../model-catalog.js';
 import {
   CUSTOM_MODEL_SENTINEL,
+  PRECERTIFIED_MODEL_REGISTRY,
   PROVIDERS,
   getProvider,
   getProviderDefaultModel,
@@ -16,6 +18,8 @@ import {
   precertifiedCertificationForModel,
   type ProviderId,
 } from '@crmy/shared';
+
+const CERTIFY_OUTPUT_DIR = './eval-runs';
 
 // ── Input validators ───────────────────────────────────────────────────────────
 function validateEmail(input: string): boolean | string {
@@ -166,8 +170,28 @@ async function detectOllamaModels(baseUrl = 'http://localhost:11434'): Promise<O
 }
 
 function preferredOllamaModel(installedModels: string[]): string {
-  const preferred = getProvider('ollama').models.map(model => model.id);
+  const preferred = providerModelsFromCatalog('ollama').map(model => model.id);
   return preferred.find(model => installedModels.includes(model)) ?? installedModels[0] ?? getProviderDefaultModel('ollama');
+}
+
+function uniqueProviderChoices(...groups: ProviderId[][]): ProviderId[] {
+  const seen = new Set<ProviderId>();
+  const choices: ProviderId[] = [];
+  for (const group of groups) {
+    for (const provider of group) {
+      if (seen.has(provider)) continue;
+      seen.add(provider);
+      choices.push(provider);
+    }
+  }
+  return choices;
+}
+
+function precertifiedProviderChoices(): ProviderId[] {
+  return uniqueProviderChoices(
+    PRECERTIFIED_MODEL_REGISTRY.map(entry => entry.provider),
+    PROVIDERS.map(provider => provider.id).filter(id => id !== 'ollama' && id !== 'custom'),
+  );
 }
 
 async function promptForModel(
@@ -176,12 +200,13 @@ async function promptForModel(
   extraModels: string[] = [],
 ): Promise<string> {
   const providerDef = getProvider(provider);
+  const providerModels = providerModelsFromCatalog(provider);
   const choices = new Map<string, { name: string; value: string }>();
 
   for (const model of extraModels) {
     choices.set(model, { name: `${model} (installed locally)`, value: model });
   }
-  for (const model of providerDef.models) {
+  for (const model of providerModels) {
     if (!choices.has(model.id)) {
       choices.set(model.id, { name: `${model.label} (${model.id})`, value: model.id });
     }
@@ -217,12 +242,18 @@ async function promptForModel(
 async function promptForProviderSetup(
   inquirer: typeof import('inquirer').default,
   providerChoices: ProviderId[],
+  options: {
+    intro?: string;
+    configureMessage?: string;
+    defaultProvider?: ProviderId;
+  } = {},
 ): Promise<AgentSetupConfig | null> {
+  if (options.intro) console.log(options.intro);
   const { configure } = await inquirer.prompt([
     {
       type: 'confirm',
       name: 'configure',
-      message: '  Configure a Workspace Agent model now?',
+      message: options.configureMessage ?? '  Configure a Workspace Agent model now?',
       default: true,
     },
   ]);
@@ -233,6 +264,7 @@ async function promptForProviderSetup(
       type: 'list',
       name: 'provider',
       message: '  Provider:',
+      default: options.defaultProvider ?? providerChoices[0],
       choices: providerChoices.map(id => {
         const providerDef = getProvider(id);
         return { name: providerDef.label, value: id };
@@ -289,6 +321,7 @@ async function chooseAgentSetup(
   inquirer: typeof import('inquirer').default,
   yesMode: boolean,
   isInteractive: boolean,
+  demoMode: boolean,
 ): Promise<AgentSetupConfig | null> {
   if (process.env.CRMY_AGENT_ENABLED === 'false') return null;
 
@@ -321,6 +354,23 @@ async function chooseAgentSetup(
       };
     }
     return null;
+  }
+
+  if (demoMode) {
+    const providerChoices = uniqueProviderChoices(
+      precertifiedProviderChoices(),
+      ollama.available ? ['ollama'] : [],
+      ['custom'],
+    );
+    return promptForProviderSetup(
+      inquirer,
+      providerChoices,
+      {
+        intro: '  For the full automatic Memory demo, choose a CRMy pre-certified hosted model. Local or custom models still work in review mode until certification passes.',
+        configureMessage: '  Configure a Workspace Agent model for the demo now?',
+        defaultProvider: PRECERTIFIED_MODEL_REGISTRY[0]?.provider,
+      },
+    );
   }
 
   if (ollama.available) {
@@ -412,12 +462,63 @@ async function saveWorkspaceAgentConfig(
   );
 }
 
+function printUncertifiedModelGuidance(): void {
+  console.log('  CRMy won\'t let an unproven model invent customer truth.');
+  console.log(`  Certify this exact model to turn on automatic Memory: crmy certify --output ${CERTIFY_OUTPUT_DIR}`);
+  console.log('  Until then, CRMy will keep grounded Signals in review mode.');
+}
+
+async function runInitModelCertification(db: DbLike, tenantId: string): Promise<void> {
+  let spinner = createSpinner('Running live model certification...');
+  try {
+    const { certifyTenantModel } = await import('@crmy/server') as unknown as {
+      certifyTenantModel: (options: {
+        db: DbLike;
+        tenantId: string;
+        output?: string;
+      }) => Promise<{
+        status: 'certified' | 'failed';
+        score: number | null;
+        run?: {
+          run_id: string;
+          profile: string;
+          totals: { cases: number; passed: number; failed: number; errored: number; skipped: number };
+          artifacts: string[];
+        };
+        message: string;
+      }>;
+    };
+    const result = await certifyTenantModel({ db, tenantId, output: CERTIFY_OUTPUT_DIR });
+    if (result.status === 'certified') {
+      spinner.succeed(`Model certified (${Math.round((result.score ?? 0) * 100)}%). Automatic Memory can run when the remaining trust gates pass.`);
+    } else {
+      spinner.fail('Model certification did not pass; automatic Memory remains review-only.');
+    }
+    if (result.run) {
+      console.log(`  Run: ${result.run.run_id} (${result.run.profile})`);
+      console.log(`  Cases: ${result.run.totals.cases} | passed: ${result.run.totals.passed} | failed: ${result.run.totals.failed} | errored: ${result.run.totals.errored} | skipped: ${result.run.totals.skipped}`);
+    }
+    console.log(`  ${result.message}`);
+    if (result.run?.artifacts.length) {
+      console.log('  Artifacts:');
+      for (const artifact of result.run.artifacts) console.log(`    ${artifact}`);
+    }
+  } catch (err) {
+    spinner.fail('Model certification could not run; automatic Memory remains review-only.');
+    console.log(`  ${(err as Error).message}`);
+    console.log(`  Run later: crmy certify --output ${CERTIFY_OUTPUT_DIR}`);
+  }
+}
+
 export function initCommand(): Command {
   return new Command('init')
     .description('Set up CRMy: database tables, owner account, API key, Workspace Agent model, and demo data')
     .option('-y, --yes', 'Use defaults non-interactively (requires CRMY_ADMIN_EMAIL + CRMY_ADMIN_PASSWORD; DATABASE_URL optional)')
     .option('--demo', 'Load demo customer data and context for a fast first run')
     .option('--no-demo', 'Skip demo data seeding')
+    .option('--certify-model', 'Run live model certification after saving an uncertified Workspace Agent model')
+    .option('--no-certify-model', 'Do not prompt or run model certification during init')
+    .option('--server-url <url>', 'Server URL to save in config', process.env.CRMY_SERVER_URL ?? 'http://localhost:3000')
     .action(async (opts, command: Command) => {
       const yesMode = !!opts.yes;
       const demoOptionSource = command.getOptionValueSource('demo');
@@ -744,8 +845,9 @@ export function initCommand(): Command {
         // Generate JWT + stored-secret encryption keys, then write config.
         jwtSecret = crypto.randomBytes(32).toString('hex');
         encryptionKey = crypto.randomBytes(32).toString('hex');
+        const serverUrl = String(opts.serverUrl ?? process.env.CRMY_SERVER_URL ?? 'http://localhost:3000').trim() || 'http://localhost:3000';
         const crmmyConfig = {
-          serverUrl: 'http://localhost:3000',
+          serverUrl,
           apiKey: rawKey,
           tenantId: 'default',
           database: { url: databaseUrl },
@@ -780,7 +882,7 @@ export function initCommand(): Command {
 
       let configuredAgent: AgentSetupConfig | null = null;
       try {
-        configuredAgent = await chooseAgentSetup(inquirer, yesMode || demoMode, isInteractive);
+        configuredAgent = await chooseAgentSetup(inquirer, yesMode, isInteractive, demoMode);
         if (configuredAgent) {
           spinner = createSpinner(`Saving ${getProvider(configuredAgent.provider).label} model settings…`);
           await saveWorkspaceAgentConfig(db, tenantId, configuredAgent, jwtSecret, encryptionKey);
@@ -795,11 +897,31 @@ export function initCommand(): Command {
           if (certification) {
             console.log(`  Automatic Memory enabled by CRMy certification ${certification.run_id} (${Math.round(certification.score * 100)}%).`);
           } else {
-            console.log('  Automatic Memory will stay review-only until this model passes `crmy certify`.');
+            printUncertifiedModelGuidance();
+            let runCertification = opts.certifyModel === true;
+            if (opts.certifyModel === undefined && !yesMode && isInteractive) {
+              const answer = await inquirer.prompt([
+                {
+                  type: 'confirm',
+                  name: 'runCertification',
+                  message: '  Run quick certification now? (~1 min)',
+                  default: true,
+                },
+              ]);
+              runCertification = Boolean(answer.runCertification);
+            }
+            if (runCertification) {
+              await runInitModelCertification(db, tenantId);
+            } else {
+              console.log(`  Continuing in review mode. Run later: crmy certify --output ${CERTIFY_OUTPUT_DIR}`);
+            }
           }
         } else {
           console.log('  Workspace Agent model setup skipped.');
           console.log('  Configure it later in Settings -> Model or rerun init with CRMY_AGENT_PROVIDER and CRMY_AGENT_MODEL.\n');
+          if (demoMode) {
+            console.log('  Demo data and review-only workflows still work. Automatic Memory turns on after you choose a CRMy pre-certified model or run `crmy certify --output ./eval-runs`.\n');
+          }
         }
       } catch (err) {
         console.log(`  \x1b[33m⚠\x1b[0m  Workspace Agent setup skipped: ${(err as Error).message}`);

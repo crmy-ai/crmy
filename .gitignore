@@ -8,3 +8,5 @@ dist/
 .claude
 .DS_Store
 *.swp
+# Internal marketing drafts — never publish to GitHub
+blog/

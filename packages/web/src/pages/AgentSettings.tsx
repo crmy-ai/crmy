@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Sparkles, Bot, KeyRound, Users, TriangleAlert, Eye, EyeOff, X,
-  ActivitySquare, ArrowRight, CheckCircle2, XCircle,
+  ActivitySquare, ArrowRight, CheckCircle2, XCircle, Copy,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -101,6 +101,17 @@ function ModelCertificationStatus({ config }: { config?: AgentConfigData }) {
     : status === 'failed'
     ? 'Certification failed'
     : 'Review-only until certified';
+  const certifyCommand = 'crmy certify --output ./eval-runs';
+  const showCertifyCommand = !automaticMemoryEnabled && !autoPromoteDisabled;
+
+  const copyCertifyCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(certifyCommand);
+      toast({ title: 'Certification command copied' });
+    } catch {
+      toast({ title: 'Copy failed', description: certifyCommand, variant: 'destructive' });
+    }
+  };
 
   return (
     <div className={`rounded-xl border p-3 ${tone}`}>
@@ -115,6 +126,19 @@ function ModelCertificationStatus({ config }: { config?: AgentConfigData }) {
           </div>
           {config?.model_certification_prompt && (
             <p className="mt-2 text-xs leading-5 opacity-90">{config.model_certification_prompt}</p>
+          )}
+          {showCertifyCommand && (
+            <div className="mt-3 flex flex-col gap-2 rounded-lg border border-current/15 bg-background/60 p-2 sm:flex-row sm:items-center sm:justify-between">
+              <code className="break-all text-xs text-foreground">{certifyCommand}</code>
+              <button
+                type="button"
+                onClick={copyCertifyCommand}
+                className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md border border-current/20 px-2 text-xs font-semibold hover:bg-current/10"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </button>
+            </div>
           )}
         </div>
         <div className="grid shrink-0 gap-1 text-xs md:min-w-44">

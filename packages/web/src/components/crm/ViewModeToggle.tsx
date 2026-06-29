@@ -15,7 +15,7 @@ export function ViewModeToggle({
   className?: string;
 }) {
   return (
-    <div className={`hidden h-9 rounded-xl border border-border bg-muted p-0.5 md:inline-flex ${className}`}>
+    <div className={`inline-flex h-9 rounded-xl border border-border bg-muted p-0.5 ${className}`}>
       <button
         type="button"
         onClick={() => onChange('cards')}

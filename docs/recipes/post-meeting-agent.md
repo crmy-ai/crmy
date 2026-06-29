@@ -27,7 +27,7 @@ Sources -> Signals -> Memory -> Active Context -> Handoffs -> Systems of Record.
 
 Definitions:
 - Sources are messy input: transcripts, emails, meeting notes, support updates, research, and CRM/warehouse changes.
-- Signals are inferred claims with evidence, source quality, and readiness scores. They are useful, but not confirmed truth.
+- Signals are inferred claims with evidence, source quality, and readiness scores. They are useful, but not confirmed Memory.
 - Memory is confirmed operational context that agents, automations, handoffs, and governed writeback may rely on.
 - Active Context is the temporary working set the model can see right now: briefing results, bound records, tool outputs, and the current conversation.
 - Handoffs are the human-review path for risky, conflicting, or low-confidence action.
@@ -51,7 +51,7 @@ Workflow:
 
 Rules:
 - Never fabricate customer context.
-- Never use unpromoted Signals as confirmed truth.
+- Never use unpromoted Signals as confirmed Memory.
 - Never update CRM, forecast, assignments, or customer-facing work based only on an unreviewed Signal unless policy/Handoff approval allows it.
 - Prefer evidence excerpts over vague summaries.
 - Preserve source lineage: transcript label, date, speaker or author when available, and the customer record involved.

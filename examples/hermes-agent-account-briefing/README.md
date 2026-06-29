@@ -10,11 +10,13 @@ From the CRMy repo or any machine with access to your CRMy database:
 
 ```bash
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy
-npx -y @crmy/cli init --yes
-npx -y @crmy/cli agent-smoke
+export CRMY_ADMIN_EMAIL=admin@example.com
+export CRMY_ADMIN_PASSWORD=crmy-demo-123
+npx -y @crmy/cli init --yes --demo
+npx -y @crmy/cli quickstart --no-seed
 ```
 
-`init --yes` seeds the Northstar Labs demo. If you already initialized CRMy without demo data, run:
+`init --yes --demo` seeds the Northstar Labs demo. If you already initialized CRMy without demo data, run:
 
 ```bash
 npx -y @crmy/cli seed-demo --reset
@@ -35,11 +37,13 @@ mcp_servers:
       include:
         - customer_record_resolve
         - briefing_get
+        - action_context_get
         - context_ingest_auto
         - context_signal_group_list
         - context_signal_group_get
         - context_signal_group_promote
         - context_signal_handoff
+        - context_lineage_get
         - email_draft_preview
         - email_draft_save
         - record_draft_preview
@@ -84,6 +88,7 @@ The answer should mention confirmed Memory separately from unconfirmed Signals, 
 Run:
 
 ```bash
+npx -y @crmy/cli quickstart --no-seed --json
 npx -y @crmy/cli agent-smoke --json
 npx -y @crmy/cli tools describe briefing_get
 ```

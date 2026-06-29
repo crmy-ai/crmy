@@ -1,8 +1,8 @@
 # CRMy User Guide
 
-Complete documentation for CRMy, an open-source governed context layer for customer-facing agents. Use CRMy when an agent needs to act on customer context but must know what the customer actually said, what is stale or inferred, which actions are safe, and what proof exists. CRMy ingests transcripts, notes, emails, CRM changes, and other customer data; turns them into source-grounded Signals and confirmed Memory; and serves Action Context over MCP, REST, CLI, and the web UI so agents can act with evidence, policy, freshness checks, and receipts. It works connector-free (transcripts, notes, and emails are enough); CRM and warehouse systems of record are an optional upgrade.
+Complete documentation for CRMy, an open-source provenance and governance layer for customer-facing agents. Use CRMy when an agent needs to act on customer context but must know what the customer actually said, what is stale or inferred, which actions are safe, and what proof exists. CRMy ingests transcripts, notes, emails, CRM changes, and other customer data; turns them into source-grounded Signals and confirmed Memory; and serves Action Context over MCP, REST, CLI, and the web UI so agents can act with evidence, policy, freshness checks, and receipts. It works connector-free (transcripts, notes, and emails are enough); CRM and warehouse systems of record are an optional upgrade.
 
-New here? Run `npx -y @crmy/cli init --demo` then `npx -y @crmy/cli quickstart` to see the connector-free path end to end, or jump to [Getting Started](#getting-started).
+New here? Run the guided installer, or run `npx -y @crmy/cli init --demo` then `npx -y @crmy/cli quickstart`, to see the connector-free path end to end. Jump to [Getting Started](#getting-started) for the full setup flow.
 
 ---
 
@@ -20,31 +20,43 @@ New here? Run `npx -y @crmy/cli init --demo` then `npx -y @crmy/cli quickstart` 
 10. [Actors](#actors)
 11. [Assignments](#assignments)
 12. [Context Engine](#context-engine)
-13. [Briefings](#briefings)
-14. [Identity Resolution](#identity-resolution)
-15. [Type Registries](#type-registries)
-16. [Scope Enforcement](#scope-enforcement)
-17. [Governor Limits](#governor-limits)
-18. [Use Cases](#use-cases)
-19. [Experimental Automation](#experimental-automation)
-20. [Webhooks](#webhooks)
-21. [Customer Email](#customer-email)
-22. [Messaging & Channels](#messaging--channels)
-23. [Custom Fields](#custom-fields)
-24. [Action Policies and HITL (Human-in-the-Loop)](#action-policies-and-hitl-human-in-the-loop)
-25. [Analytics & Reporting](#analytics--reporting)
-26. [Systems of Record](#systems-of-record)
-27. [Roadmap](#roadmap)
-28. [Plugins](#plugins)
-29. [MCP Tools Reference](#mcp-tools-reference)
-30. [REST API Reference](#rest-api-reference)
-31. [Database & Migrations](#database--migrations)
+13. [Knowledge](#knowledge)
+14. [Briefings](#briefings)
+15. [Identity Resolution](#identity-resolution)
+16. [Type Registries](#type-registries)
+17. [Scope Enforcement](#scope-enforcement)
+18. [Governor Limits](#governor-limits)
+19. [Use Cases](#use-cases)
+20. [Experimental Automation](#experimental-automation)
+21. [Webhooks](#webhooks)
+22. [Customer Email](#customer-email)
+23. [Experimental Sequences](#experimental-sequences)
+24. [Messaging & Channels](#messaging--channels)
+25. [Custom Fields](#custom-fields)
+26. [Action Policies and HITL (Human-in-the-Loop)](#action-policies-and-hitl-human-in-the-loop)
+27. [Analytics & Reporting](#analytics--reporting)
+28. [Systems of Record](#systems-of-record)
+29. [Roadmap](#roadmap)
+30. [Plugins](#plugins)
+31. [MCP Tools Reference](#mcp-tools-reference)
+32. [REST API Reference](#rest-api-reference)
+33. [Database & Migrations](#database--migrations)
 
 ---
 
 ## Getting Started
 
 ### Install
+
+Recommended guided local installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/crmy-ai/crmy/main/scripts/install.sh | bash
+```
+
+It installs the CLI into a user-owned prefix, prepares PostgreSQL, initializes the workspace, optionally seeds demo data, runs health checks, and proves the connector-free quickstart path.
+
+Prefer npm:
 
 ```bash
 npm install -g @crmy/cli
@@ -89,13 +101,27 @@ npx -y @crmy/cli server
 claude mcp add crmy -- npx -y @crmy/cli mcp
 ```
 
-`quickstart` resolves a customer, returns a governed briefing, checks Action Context, and proves lineage — with no CRM connector configured. `npx -y @crmy/cli doctor` runs the same checks as a pass/fail health check, and `npx -y @crmy/cli agent-smoke` is the underlying smoke test.
+`quickstart` resolves a customer, returns a governed briefing, checks Action Context, and proves lineage — with no CRM connector configured. Use `npx -y @crmy/cli doctor` for setup health checks such as database, migrations, model readiness, secrets, and port availability; `npx -y @crmy/cli agent-smoke` is the lower-level seeded workflow check.
 
 Prefer prompts? Run `npx -y @crmy/cli init` and choose whether to load demo data when prompted.
 
 Workspace Agent model setup is part of init. Interactive init checks for local Ollama first. If Ollama is unavailable, or you decline it, the wizard lets you choose from the same provider/model catalog used by the web Model Settings page and still supports a custom model ID.
 
-The shared catalog currently includes Anthropic, OpenAI, Azure OpenAI, Google Gemini, Amazon Bedrock, Mistral, LiteLLM Proxy, OpenRouter, Ollama, Databricks AI Gateway, NVIDIA NIM, and other OpenAI-compatible endpoints. Backup provider failover is configured later in **Settings → Model**, not during init.
+The shared catalog currently includes Anthropic, OpenAI, Azure OpenAI, Google Gemini, Amazon Bedrock, Mistral, LiteLLM Proxy, OpenRouter, Ollama, Databricks AI Gateway, NVIDIA NIM, and other OpenAI-compatible endpoints. CRMy-certified defaults can enable automatic Memory immediately; newer or custom models stay review-only until `crmy certify` passes for that exact provider/base URL/model. Backup provider failover is configured later in **Settings → Model**, not during init.
+
+For the step-by-step operator flow, including candidate selection, `crmy certify`, expected output, artifacts, and troubleshooting, see [Model Evaluation and Certification](model-evaluation.md).
+
+Keep the selectable catalog fresh with `crmy models`:
+
+```bash
+crmy models list
+crmy models refresh --provider openrouter
+crmy models refresh --provider ollama
+crmy models probe openai gpt-5.5 --base-url https://api.openai.com/v1
+crmy models recommend
+```
+
+`models refresh` writes provider-discovered metadata to `~/.crmy/model-catalog.json` and later setup flows merge it with the built-in catalog. This is discovery only: it never writes model certification, never turns on automatic Memory for unknown models, and never bypasses `crmy certify`.
 
 For non-interactive setup, either run Ollama locally with an installed model before `init --yes --demo`, or set provider variables:
 
@@ -131,9 +157,9 @@ resolution plumbing; they do not prove live extraction quality.
 
 The `seeded_context` profile calls production briefing and Action Context
 services against a small fixture DB, then scores retrieval recall, scope leaks,
-stale warnings, readiness decisions, unsafe writeback allowance, and source
-attribution safety. The `agent_runtime` profile adds runnable tool-choice and
-trajectory smoke checks.
+stale warnings, readiness decisions, unsafe writeback allowance, source
+attribution safety, and Tier-2 high-impact auto-promotion false-allow. The
+`agent_runtime` profile adds runnable tool-choice and trajectory smoke checks.
 
 To run live extraction quality, configure an eval model and use the live
 profile:
@@ -304,7 +330,7 @@ npm run dev
 
 ### .crmy.json
 
-Created by `crmy init`. Stored in your project root. Auto-added to `.gitignore`.
+Created by `crmy init`. Stored in your project root and auto-added to `.gitignore`. It contains secrets, so CRMy writes it with owner-only file permissions (`0600`). A global copy is also stored at `~/.crmy/config.json` so MCP commands can run from any working directory.
 
 ```json
 {
@@ -680,6 +706,10 @@ The Context page is the dedicated workspace for the customer-context lifecycle. 
 Context Graph is a record-centered explorer, not the full Memory lifecycle view. Select a customer record to explore related records, Current Memory, recent activity, and open handoffs. Use **Context → Lineage** when you need to trace Sources through Signals, Memory, Handoffs, writebacks, and audit receipts.
 
 Click any graph node to open a detail drawer with key fields, content preview, and links back to the underlying record or context item.
+
+#### Knowledge (`/app/knowledge`)
+
+Admin/owner surface for governed company, product, pricing, implementation, security, roadmap, and competitive facts. Knowledge is deliberately separate from customer Memory: it describes CRMy or market/product claims, while Memory describes what a customer said, did, or needs. Card and list views let admins review Trusted Facts, inspect source provenance, approve external-use eligibility, mark facts stale, retire/reject facts, and scan conflicts. The detail drawer shows the fact body, confidence/readiness, source label/link/ref/version, grounding state, approval state, visibility, freshness, product scope, competitors, and review owner.
 
 #### Settings (`/app/settings`)
 
@@ -1307,7 +1337,7 @@ The Context Engine turns Source into reviewable Signals and Current Memory attac
 
 Memory has a first-class lifecycle:
 
-- **Signal** — inferred, evidence-backed context that is not confirmed truth yet.
+- **Signal** — inferred, evidence-backed context that has not been confirmed as Memory yet.
 - **Current Memory** — confirmed operational context agents can use for briefings, workflows, handoffs, and governed writeback.
 - **Needs Review** — Current Memory whose `valid_until` has passed. Agents should verify it before acting.
 - **Superseded** — old Memory replaced by fresher evidence. It stays preserved for audit and lineage.
@@ -1373,7 +1403,7 @@ no confidence half-life unless an admin overrides them.
 
 ### Memory Health and automatic assignments
 
-Current Memory with a `valid_until` in the past needs review. The briefing service surfaces these entries with warnings so agents know not to treat aging customer context as unquestioned truth.
+Current Memory with a `valid_until` in the past needs review. The briefing service surfaces these entries with warnings so agents know not to treat aging customer context as current without review.
 
 CRMy automatically assigns Memory that needs review — a background worker runs every 60 seconds, finds Current Memory past its review date, identifies the actor with the most context contributions to that subject, and creates a `stale_context_review` assignment. Duplicate assignments are never created for the same entry.
 
@@ -1453,7 +1483,7 @@ Returns `{ extracted_count, memory_created, signals_created, skipped, signals, m
 CRMy separates messy Sources from Current Memory:
 
 - **Sources** are raw source material: calls, emails, notes, transcripts, calendar meetings, CRM/warehouse changes, REST/API payloads, MCP submissions, and manual Add Context flows. Source metadata can represent Slack, support, product usage, documents, and custom systems when those systems feed CRMy through API, MCP, or adapters.
-- **Signals** are inferred context extracted from Sources. They include confidence and evidence, but they are not confirmed truth.
+- **Signals** are inferred context extracted from Sources. They include confidence and evidence, but they are not confirmed Memory.
 - CRMy combines related Signals into one evidence-backed claim so multiple sources can support, strengthen, or contradict the same inference.
 - **Memory** is Current typed operational context. Briefings and normal context search return Memory by default.
 
@@ -1621,6 +1651,64 @@ The generated OpenAPI contract lives at `docs/openapi.json` and is served by the
 
 ```bash
 npm run generate:openapi --workspace=packages/server
+```
+
+---
+
+## Knowledge
+
+Knowledge is CRMy's governed retrieval boundary for shared business facts: company claims, product capabilities, pricing, security posture, implementation details, roadmap positioning, and competitive responses. Keep it separate from customer Memory. Memory says what a customer said, did, prefers, risks, or needs; Knowledge says what CRMy can safely claim about its own product, market, or supporting facts.
+
+Agents can retrieve Knowledge with `knowledge_retrieve`, and briefings, Action Context, and email drafts can include approved Trusted Facts as citations. Retrieval is optional and non-blocking: if no Trusted Facts are configured, CRMy returns a clear `not_configured` or `no_results` state instead of inventing product claims.
+
+Customer-facing retrieval is strict. A fact must be source-grounded, approved, externally visible, approved for external use, fresh, and not conflicting. Internal retrieval can include riskier or stale facts, but returns warnings so an agent knows what not to say to a customer.
+
+### Trusted Fact governance
+
+Admins use `/app/knowledge`, CLI commands, or MCP tools to review facts before agents rely on them. The detail view should answer:
+
+- What is the exact fact or snippet?
+- Where did it come from (`source_label`, `source_url`, `source_ref`, `source_version`, `external_key`)?
+- Is it grounded in source text?
+- Is it approved for customer-facing use?
+- Is it fresh, stale, deprecated, conflicting, rejected, or active?
+- Which product scopes, competitors, or categories does it apply to?
+
+Knowledge review changes only Trusted Facts. It does not promote customer Memory, alter customer records, or write to systems of record.
+
+### MCP tools
+
+| Tool | Description |
+|---|---|
+| `knowledge_retrieve` | Retrieve approved, source-grounded Trusted Facts for a customer action. Returns claims, exclusions, warnings, citations, and a retrieval receipt. |
+| `knowledge_claim_upsert` | Admin/governance tool to create or update a Trusted Fact. Requires source text so CRMy can verify grounding. |
+| `knowledge_claim_list` | Admin/governance queue for pending, stale, conflicting, rejected, deprecated, or assigned facts. |
+| `knowledge_claim_review` | Approve, reject, deprecate, mark stale, or reactivate a Trusted Fact; optionally set customer-facing eligibility. |
+| `knowledge_conflicts_detect` | Detect competing Trusted Facts and optionally mark lower-priority facts conflicting. |
+
+### CLI
+
+```bash
+crmy knowledge retrieve "vendor lock-in objection" --subject "account:Northstar Labs"
+crmy knowledge retrieve "security posture for healthcare buyer" --audience internal --include-stale
+crmy knowledge list --needs-review
+crmy knowledge review <claim-id> --decision approve --external-use true
+crmy knowledge conflicts --category competitive --apply
+```
+
+### REST API
+
+```
+POST   /api/v1/knowledge/retrieve
+POST   /api/v1/knowledge/claims/list
+POST   /api/v1/knowledge/claims/review
+POST   /api/v1/knowledge/conflicts/detect
+GET    /api/v1/knowledge/source-connections
+POST   /api/v1/knowledge/source-connections
+PATCH  /api/v1/knowledge/source-connections/:id
+DELETE /api/v1/knowledge/source-connections/:id
+POST   /api/v1/knowledge/source-connections/:id/test
+POST   /api/v1/knowledge/source-connections/:id/sync
 ```
 
 ---
@@ -3174,7 +3262,7 @@ Hermes registers tools with the `mcp_<server>_<tool>` naming pattern, so `briefi
 Verify the agent-facing tool path directly:
 
 ```bash
-npx -y @crmy/cli agent-smoke
+npx -y @crmy/cli quickstart --no-seed
 ```
 
 Then ask the connected agent:

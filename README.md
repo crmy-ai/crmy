@@ -7,10 +7,10 @@
 <h2 align="center">Open-source governed context for customer-facing agents</h2>
 
 <p align="center">
-  <strong>Messy customer context in. Agent-ready Signals, Memory, Action Context, and receipts out.</strong>
+  <strong>Messy, unvalidated customer context in. Provenance-checked Signals, Memory, Action Context, and receipts out.</strong>
 </p>
 <p align="center">
-  CRMy is developer infrastructure for customer-facing agents that need to act on evidence, not unsupported prompt context. It turns transcripts, notes, emails, and CRM changes into source-grounded Signals and confirmed Memory, then serves Action Context over MCP, REST, CLI, and the web UI so agents know what is safe to say, what is stale or inferred, what needs approval, and what proof was recorded.
+  CRMy is developer infrastructure for customer-facing agents that need to act on evidence, not raw prompt context. It turns transcripts, notes, emails, and CRM changes into source-grounded Signals and confirmed Memory, then serves Action Context over MCP, REST, CLI, and the web UI so agents know what is verified, what is stale or inferred, what needs approval, and what proof was recorded.
 </p>
 
 <p align="center">
@@ -47,7 +47,7 @@ Install CRMy and create a local demo-ready workspace:
 curl -fsSL https://raw.githubusercontent.com/crmy-ai/crmy/main/scripts/install.sh | bash
 ```
 
-The installer sets up the CLI, database, optional demo data, health checks, and local web server in a guided flow.
+The installer sets up the CLI, database, optional demo data, health checks, a connector-free quickstart proof, and the local web server in a guided flow.
 
 Already have PostgreSQL?
 
@@ -70,7 +70,7 @@ Prefer the manual path, or want to see exactly what gets seeded? Use the <a href
 
 ## Why CRMy
 
-Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. The hard part is deciding what they are allowed to trust and what they are allowed to do. Raw CRM fields and pasted transcript snippets do not tell an agent whether a claim came from the customer, whether it is stale, whether it conflicts with another source, or whether a proposed action needs approval.
+Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. The hard part is deciding what they are allowed to trust and what they are allowed to do. Raw customer context is unbounded and unvalidated: CRM fields and pasted transcript snippets do not tell an agent whether a claim came from the customer, whether it is stale, whether it conflicts with another source, or whether a proposed action needs approval.
 
 Without a governed context layer, agents can't answer the most critical questions:
 
@@ -147,7 +147,11 @@ npx -y @crmy/cli quickstart
 npx -y @crmy/cli server
 ```
 
-`quickstart` seeds realistic demo data and runs the path an agent takes over MCP: resolve a customer, get a governed briefing, check Action Context, and prove lineage. (`npx -y @crmy/cli doctor` runs the same checks as a pass/fail health check.)
+`quickstart` seeds realistic demo data and runs the path an agent takes over MCP: resolve a customer, get a governed briefing, check Action Context, and prove lineage. Use `npx -y @crmy/cli doctor` for setup health checks such as database, migrations, model readiness, secrets, and port availability.
+
+Model choices come from a built-in catalog plus optional provider discovery. Run `npx -y @crmy/cli models refresh --provider openrouter` or `--provider ollama` to update selectable models; discovered models remain review-only until `crmy certify` passes for that exact provider/base URL/model.
+
+To certify a bring-your-own or newly released model for automatic Memory, follow the [Model Evaluation and Certification guide](docs/model-evaluation.md). Certification runs the live model eval suite and only unlocks automatic Memory when the exact provider/base URL/model passes with recorded evidence.
 
 **Representative output:**
 

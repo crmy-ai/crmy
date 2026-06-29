@@ -5,13 +5,14 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAdminActors, useApproveActor, useCreateActor, useCreateUser, useInviteUser, useRejectActor, useResetUserPassword, useUpdateActor, useUpdateUser, useApiKeys, useCreateApiKey, useRevokeApiKey, useAgentSpecializations, useUpsertSpecialization, useDeleteSpecialization, useSetActorAvailability, useAdminActorConnections, useUpdateMailboxConnectionStatus, useUpdateCalendarConnectionStatus, useDeleteMailboxConnection, useDeleteCalendarConnection, type AdminActorRow, type ActorConnectionSummary } from '@/api/hooks';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
+import { ViewModeToggle, type ViewMode } from '@/components/crm/ViewModeToggle';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
 import { toast } from '@/hooks/use-toast';
 import { headerDescription } from '@/lib/headerCopy';
 import {
-  Users, Bot, LayoutGrid, List, ChevronUp, ChevronDown,
+  Users, Bot, ChevronUp, ChevronDown,
   Pencil, Trash2, Shield, Phone, MessageSquare,
   Plus, X, CheckCircle2, CircleDot, Power, PowerOff,
   Key, Copy, ChevronRight, Lock, Star, Wifi, WifiOff, Coffee, Send,
@@ -953,17 +954,17 @@ const initAgentForm = (): AgentFormState => ({
 
 interface ActorsSettingsProps {
   /** When provided the parent controls the view toggle (e.g. via TopBar). */
-  view?: 'table' | 'cards';
-  onViewChange?: (v: 'table' | 'cards') => void;
+  view?: ViewMode;
+  onViewChange?: (v: ViewMode) => void;
 }
 
 export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsSettingsProps = {}) {
   const currentUser = getUser();
   const isMobile = useIsMobile();
-  const [viewInternal, setViewInternal] = useState<'table' | 'cards'>('table');
+  const [viewInternal, setViewInternal] = useState<ViewMode>('table');
   // Use controlled value when parent provides it, otherwise own state
   const view = viewProp ?? viewInternal;
-  const setView = (v: 'table' | 'cards') => { setViewInternal(v); onViewChange?.(v); };
+  const setView = (v: ViewMode) => { setViewInternal(v); onViewChange?.(v); };
   const effectiveView = isMobile ? 'cards' : view;
 
   // Data
@@ -1306,20 +1307,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
 
         {/* View toggle — only shown when parent isn't controlling it (e.g. Settings embed) */}
         {!viewProp && (
-          <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
-            <button
-              onClick={() => setView('table')}
-              className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              <List className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setView('cards')}
-              className={`p-1.5 rounded-lg text-sm transition-all ${view === 'cards' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-          </div>
+          <ViewModeToggle value={view} onChange={setView} className="hidden md:inline-flex" />
         )}
       </div>
 

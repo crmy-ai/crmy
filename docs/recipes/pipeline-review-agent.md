@@ -56,7 +56,7 @@ From each briefing, extract:
 Call `context_stale` with `limit: 50` to get all stale entries across the pipeline. Group them by account.
 
 ### 5. Detect contradictions
-For each HIGH or MEDIUM risk account, call `context_detect_contradictions` on the account. If contradictions are found, call `context_contradiction_assign` so a reviewer can resolve them without the agent inventing a truth.
+For each HIGH or MEDIUM risk account, call `context_detect_contradictions` on the account. If contradictions are found, call `context_contradiction_assign` so a reviewer can resolve them without the agent settling an unsupported claim.
 
 ### 6. Auto-assign stale reviews
 Call `context_stale_assign` with `limit: 20` to create review assignments for stale entries. CRMy routes these to the original author.

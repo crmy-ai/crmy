@@ -67,8 +67,15 @@ import {
   UserCheck,
   Check,
   ChevronsUpDown,
+  MoreHorizontal,
 } from 'lucide-react';
 import { formatDistanceToNow, isPast, parseISO } from 'date-fns';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 type Tab = 'needs_attention' | 'review_queue' | 'delegated' | 'all';
 type ViewMode = 'card' | 'table';
@@ -486,6 +493,50 @@ function DecisionPacket({ req, compact = false }: { req: HITLRequest; compact?: 
   const visibleEvidence = fields.evidence.slice(0, compact ? 2 : 4);
   const visibleBlockers = fields.blockers.slice(0, compact ? 1 : 3);
 
+  if (compact) {
+    const hasCompactContent = !!fields.proposedChange || visibleEvidence.length > 0 || visibleBlockers.length > 0 || highlights.length > 0;
+    if (!hasCompactContent) return null;
+    return (
+      <div className="rounded-xl border border-border bg-muted/15 p-3 space-y-3">
+        {highlights.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 text-xs">
+            {highlights.slice(0, 3).map(([label, value]) => (
+              <span key={label} className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/70 bg-card/70 px-2 py-0.5 text-muted-foreground">
+                <span className="font-medium">{label}</span>
+                <span className="truncate text-foreground">{String(value)}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {fields.proposedChange && (
+          <div className="text-xs">
+            <p className="font-medium text-muted-foreground">Proposed change</p>
+            <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-foreground">{fields.proposedChange}</p>
+          </div>
+        )}
+
+        {visibleEvidence.length > 0 && (
+          <div className="text-xs">
+            <p className="font-medium text-muted-foreground">Evidence</p>
+            <ul className="mt-1 space-y-1">
+              {visibleEvidence.map((item, index) => <li key={index} className="line-clamp-2 text-foreground">- {item}</li>)}
+            </ul>
+          </div>
+        )}
+
+        {visibleBlockers.length > 0 && (
+          <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-xs">
+            <p className="font-medium text-amber-600">Needs review because</p>
+            <ul className="mt-1 space-y-1 text-foreground">
+              {visibleBlockers.map((item, index) => <li key={index} className="line-clamp-2">- {item}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl border border-border bg-muted/15 p-3 space-y-3">
       <div className="flex items-start justify-between gap-3">
@@ -677,7 +728,6 @@ function HITLCard({ req, onOpenDetails }: { req: HITLRequest; onOpenDetails: () 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-600">{isPending ? 'Decision required' : 'Decision complete'}</span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-mono">{req.action_type}</span>
             <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[req.status] ?? STATUS_COLORS.pending}`}>{req.status.replace('_', ' ')}</span>
             {req.priority && <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLORS[req.priority] ?? PRIORITY_COLORS.normal}`}>{req.priority}</span>}
             {req.escalated_at && <span className="text-xs flex items-center gap-1 text-destructive"><AlertTriangle className="w-3 h-3" />Escalated</span>}
@@ -687,17 +737,7 @@ function HITLCard({ req, onOpenDetails }: { req: HITLRequest; onOpenDetails: () 
               </span>
             )}
           </div>
-          <div className="flex items-start justify-between gap-3">
-            <p className="text-sm font-medium text-foreground">{req.action_summary}</p>
-            <button
-              type="button"
-              onClick={onOpenDetails}
-              className="h-7 px-2 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors flex items-center gap-1"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              Details
-            </button>
-          </div>
+          <p className="text-sm font-medium text-foreground">{req.action_summary}</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {subject.label ?? 'No linked record'} · {timeAgo(req.created_at)}
           </p>
@@ -712,15 +752,65 @@ function HITLCard({ req, onOpenDetails }: { req: HITLRequest; onOpenDetails: () 
           {autoApprove && <span className="px-2 py-1 rounded-lg bg-muted/50">Auto approval {autoApprove.label.toLowerCase()}</span>}
         </div>
       )}
-      <div className="border-t border-border p-3 flex justify-end gap-2 bg-surface-sunken/30">
-        <ActionBtn label="Details" icon={<Eye className="w-3.5 h-3.5" />} onClick={onOpenDetails} loading={false} color="ghost" />
-        {isPending && <HITLDecisionActions req={req} />}
+      <div className="border-t border-border bg-surface-sunken/30 p-3 flex items-center justify-between gap-2">
+        <HITLCardMoreMenu req={req} onOpenDetails={onOpenDetails} />
+        <div className="ml-auto flex justify-end gap-2">
+          {isPending && <HITLDecisionActions req={req} primaryOnly />}
+        </div>
       </div>
     </div>
   );
 }
 
-function HITLDecisionActions({ req, note }: { req: HITLRequest; note?: string }) {
+function HITLCardMoreMenu({ req, onOpenDetails }: { req: HITLRequest; onOpenDetails: () => void }) {
+  const resolve = useResolveHITL();
+  const [acting, setActing] = useState(false);
+  const isPending = req.status === 'pending';
+
+  async function reject() {
+    setActing(true);
+    try {
+      await resolve.mutateAsync({ id: req.id, decision: 'rejected' });
+      toast({ title: 'Rejected', description: req.action_summary });
+    } catch (err) {
+      toast({ title: 'Could not resolve handoff', description: errorMessage(err, 'Check access and try again.'), variant: 'destructive' });
+    } finally {
+      setActing(false);
+    }
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          aria-label="Handoff actions"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-44">
+        <DropdownMenuItem onClick={onOpenDetails}>
+          <Eye className="mr-2 h-3.5 w-3.5" />
+          Details
+        </DropdownMenuItem>
+        {isPending && (
+          <DropdownMenuItem
+            onClick={reject}
+            disabled={acting}
+            className="text-destructive focus:text-destructive"
+          >
+            {acting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <XCircle className="mr-2 h-3.5 w-3.5" />}
+            Reject
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function HITLDecisionActions({ req, note, primaryOnly = false }: { req: HITLRequest; note?: string; primaryOnly?: boolean }) {
   const resolve = useResolveHITL();
   const [acting, setActing] = useState<'approve' | 'reject' | null>(null);
   if (req.status !== 'pending') return null;
@@ -739,7 +829,7 @@ function HITLDecisionActions({ req, note }: { req: HITLRequest; note?: string })
 
   return (
     <>
-      <ActionBtn label="Reject" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => handle('rejected')} loading={acting === 'reject'} color="destructive" />
+      {!primaryOnly && <ActionBtn label="Reject" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => handle('rejected')} loading={acting === 'reject'} color="destructive" />}
       <ActionBtn label="Approve" icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={() => handle('approved')} loading={acting === 'approve'} color="success" />
     </>
   );
@@ -1035,46 +1125,9 @@ function HITLDetailDrawer({
 // ─── Assignment Card ──────────────────────────────────────────────────────────
 
 function AssignmentCard({ task, actorMap, onOpenDetails }: { task: Assignment; actorMap: Map<string, string>; onOpenDetails: () => void }) {
-  const accept   = useAcceptAssignment();
-  const start    = useStartAssignment();
-  const complete = useCompleteAssignment();
-  const resolveReview = useResolveReviewAssignment();
-  const decline  = useDeclineAssignment();
-  const block    = useBlockAssignment();
-  const cancel   = useCancelAssignment();
-  const [acting, setActing] = useState<string | null>(null);
-
-  async function act(action: string) {
-    setActing(action);
-    try {
-      if (action === 'accept')        await accept.mutateAsync(task.id);
-      else if (action === 'start')    await start.mutateAsync(task.id);
-      else if (action === 'complete') await complete.mutateAsync({ id: task.id });
-      else if (action === 'decline')  await decline.mutateAsync({ id: task.id });
-      else if (action === 'block')    await block.mutateAsync({ id: task.id });
-      else if (action === 'cancel')   await cancel.mutateAsync({ id: task.id });
-      toast({ title: `Assignment ${action}ed` });
-    } catch {
-      toast({ title: 'Error', description: `Could not ${action} assignment.`, variant: 'destructive' });
-    } finally { setActing(null); }
-  }
-
-  async function resolveLowRiskReview() {
-    setActing('resolve_review');
-    try {
-      await resolveReview.mutateAsync({ id: task.id });
-      toast({ title: 'Review resolved', description: 'Linked Memory was marked reviewed and the assignment was completed.' });
-    } catch (err) {
-      toast({ title: 'Review still needs attention', description: errorMessage(err, 'Open the assignment details for the next step.'), variant: 'destructive' });
-    } finally {
-      setActing(null);
-    }
-  }
-
   const isOverdue = task.due_at && isPast(parseISO(task.due_at)) && !['completed', 'cancelled', 'declined'].includes(task.status);
   const assignedByName = actorMap.get(task.assigned_by) ?? task.assigned_by.slice(0, 8) + '…';
   const reviewDetail = reviewTypeDetail(task);
-  const reviewResolveAllowed = canResolveLowRiskReview(task);
   const reviewTask = isReviewAssignment(task);
 
   return (
@@ -1106,30 +1159,158 @@ function AssignmentCard({ task, actorMap, onOpenDetails }: { task: Assignment; a
           {task.context && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{task.context}</p>}
         </div>
       </div>
-      {(ACTIVE_STATUSES.includes(task.status) || reviewTask) && (
-        <div className="border-t border-border px-3 py-2 flex gap-2 flex-wrap bg-surface-sunken/30">
-          <ActionBtn label="Details" icon={<Eye className="w-3.5 h-3.5" />} onClick={onOpenDetails} loading={false} color="ghost" />
-          {reviewResolveAllowed && (
-            <ActionBtn label="Mark reviewed" icon={<ShieldCheck className="w-3.5 h-3.5" />} onClick={resolveLowRiskReview} loading={acting === 'resolve_review'} color="success" />
-          )}
-          {task.status === 'pending' && <>
-            <ActionBtn label="Accept" icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={() => act('accept')} loading={acting === 'accept'} color="success" />
-            <ActionBtn label="Decline" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => act('decline')} loading={acting === 'decline'} color="destructive" />
-          </>}
-          {task.status === 'accepted' && <>
-            <ActionBtn label="Start" icon={<Play className="w-3.5 h-3.5" />} onClick={() => act('start')} loading={acting === 'start'} color="primary" />
-            <ActionBtn label="Decline" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => act('decline')} loading={acting === 'decline'} color="ghost" />
-          </>}
-          {task.status === 'in_progress' && <>
-            <ActionBtn label="Complete" icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={() => act('complete')} loading={acting === 'complete'} color="success" />
-            <ActionBtn label="Block" icon={<Ban className="w-3.5 h-3.5" />} onClick={() => act('block')} loading={acting === 'block'} color="warning" />
-          </>}
-          {task.status === 'blocked' && <>
-            <ActionBtn label="Resume" icon={<Play className="w-3.5 h-3.5" />} onClick={() => act('start')} loading={acting === 'start'} color="primary" />
-            <ActionBtn label="Cancel" icon={<AlertOctagon className="w-3.5 h-3.5" />} onClick={() => act('cancel')} loading={acting === 'cancel'} color="ghost" />
-          </>}
-        </div>
+      {hasAssignmentActions(task) && (
+        <AssignmentActionControls task={task} onOpenDetails={onOpenDetails} className="border-t border-border bg-surface-sunken/30 p-3" />
       )}
+    </div>
+  );
+}
+
+type AssignmentActionName = 'accept' | 'start' | 'complete' | 'decline' | 'block' | 'cancel' | 'resolve_review';
+
+const ASSIGNMENT_ACTION_LABELS: Record<AssignmentActionName, string> = {
+  accept: 'Accept',
+  start: 'Start',
+  complete: 'Complete',
+  decline: 'Decline',
+  block: 'Block',
+  cancel: 'Cancel',
+  resolve_review: 'Mark reviewed',
+};
+
+const ASSIGNMENT_ACTION_TOASTS: Record<AssignmentActionName, string> = {
+  accept: 'accepted',
+  start: 'started',
+  complete: 'completed',
+  decline: 'declined',
+  block: 'blocked',
+  cancel: 'cancelled',
+  resolve_review: 'reviewed',
+};
+
+function hasAssignmentActions(task: Assignment) {
+  return ACTIVE_STATUSES.includes(task.status) || isReviewAssignment(task);
+}
+
+function assignmentActionIcon(action: AssignmentActionName, className = 'w-3.5 h-3.5') {
+  if (action === 'accept' || action === 'complete') return <CheckCircle2 className={className} />;
+  if (action === 'decline') return <XCircle className={className} />;
+  if (action === 'start') return <Play className={className} />;
+  if (action === 'block') return <Ban className={className} />;
+  if (action === 'cancel') return <AlertOctagon className={className} />;
+  return <ShieldCheck className={className} />;
+}
+
+function assignmentActionColor(action: AssignmentActionName) {
+  if (action === 'accept' || action === 'complete' || action === 'resolve_review') return 'success';
+  if (action === 'start') return 'primary';
+  if (action === 'block') return 'warning';
+  if (action === 'decline') return 'destructive';
+  return 'ghost';
+}
+
+function AssignmentActionControls({ task, onOpenDetails, className }: { task: Assignment; onOpenDetails: () => void; className?: string }) {
+  const accept   = useAcceptAssignment();
+  const start    = useStartAssignment();
+  const complete = useCompleteAssignment();
+  const resolveReview = useResolveReviewAssignment();
+  const decline  = useDeclineAssignment();
+  const block    = useBlockAssignment();
+  const cancel   = useCancelAssignment();
+  const [acting, setActing] = useState<AssignmentActionName | null>(null);
+  const reviewResolveAllowed = canResolveLowRiskReview(task);
+
+  async function act(action: AssignmentActionName) {
+    setActing(action);
+    try {
+      if (action === 'accept')        await accept.mutateAsync(task.id);
+      else if (action === 'start')    await start.mutateAsync(task.id);
+      else if (action === 'complete') await complete.mutateAsync({ id: task.id });
+      else if (action === 'decline')  await decline.mutateAsync({ id: task.id });
+      else if (action === 'block')    await block.mutateAsync({ id: task.id });
+      else if (action === 'cancel')   await cancel.mutateAsync({ id: task.id });
+      else if (action === 'resolve_review') await resolveReview.mutateAsync({ id: task.id });
+
+      if (action === 'resolve_review') {
+        toast({ title: 'Review resolved', description: 'Linked Memory was marked reviewed and the assignment was completed.' });
+      } else {
+        toast({ title: `Assignment ${ASSIGNMENT_ACTION_TOASTS[action]}` });
+      }
+    } catch (err) {
+      if (action === 'resolve_review') {
+        toast({ title: 'Review still needs attention', description: errorMessage(err, 'Open the assignment details for the next step.'), variant: 'destructive' });
+      } else {
+        toast({ title: 'Error', description: `Could not ${ASSIGNMENT_ACTION_LABELS[action].toLowerCase()} assignment.`, variant: 'destructive' });
+      }
+    } finally {
+      setActing(null);
+    }
+  }
+
+  const primaryAction: AssignmentActionName | null = reviewResolveAllowed
+    ? 'resolve_review'
+    : task.status === 'pending'
+      ? 'accept'
+      : task.status === 'accepted'
+        ? 'start'
+        : task.status === 'in_progress'
+          ? 'complete'
+          : task.status === 'blocked'
+            ? 'start'
+            : null;
+
+  const secondaryActions: AssignmentActionName[] = [];
+  if (task.status === 'pending') secondaryActions.push('decline');
+  if (task.status === 'accepted') secondaryActions.push('decline');
+  if (task.status === 'in_progress') secondaryActions.push('block');
+  if (task.status === 'blocked') secondaryActions.push('cancel');
+  const primaryLabel = primaryAction === 'start' && task.status === 'blocked'
+    ? 'Resume'
+    : primaryAction
+      ? ASSIGNMENT_ACTION_LABELS[primaryAction]
+      : '';
+
+  return (
+    <div className={cn('flex items-center justify-between gap-2', className)}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            aria-label="Assignment actions"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-44">
+          <DropdownMenuItem onClick={onOpenDetails}>
+            <Eye className="mr-2 h-3.5 w-3.5" />
+            Details
+          </DropdownMenuItem>
+          {secondaryActions.map(action => (
+            <DropdownMenuItem
+              key={action}
+              onClick={() => act(action)}
+              disabled={acting !== null}
+              className={action === 'decline' ? 'text-destructive focus:text-destructive' : undefined}
+            >
+              {acting === action ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : assignmentActionIcon(action, 'mr-2 h-3.5 w-3.5')}
+              {ASSIGNMENT_ACTION_LABELS[action]}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <div className="ml-auto flex justify-end gap-2">
+        {primaryAction && (
+          <ActionBtn
+            label={primaryLabel}
+            icon={assignmentActionIcon(primaryAction)}
+            onClick={() => act(primaryAction)}
+            loading={acting === primaryAction}
+            color={assignmentActionColor(primaryAction)}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -1175,9 +1356,11 @@ function HITLTableRow({ req, index, actorMap, onOpenDetails }: { req: HITLReques
       <td className="px-4 py-3 text-xs text-muted-foreground">{reviewer}</td>
       <td className="px-4 py-3 text-xs text-muted-foreground">{slaLabel(req.sla_minutes)}</td>
       <td className="px-4 py-3">
-        <div className="flex gap-1.5">
-          <ActionBtn label="Details" icon={<Eye className="w-3 h-3" />} onClick={onOpenDetails} loading={false} color="ghost" />
-          {isPending && <HITLDecisionActions req={req} />}
+        <div className="flex items-center justify-between gap-2">
+          <HITLCardMoreMenu req={req} onOpenDetails={onOpenDetails} />
+          <div className="ml-auto flex justify-end gap-2">
+            {isPending && <HITLDecisionActions req={req} primaryOnly />}
+          </div>
         </div>
       </td>
     </tr>
@@ -1185,46 +1368,9 @@ function HITLTableRow({ req, index, actorMap, onOpenDetails }: { req: HITLReques
 }
 
 function AssignmentTableRow({ task, actorMap, index, onOpenDetails }: { task: Assignment; actorMap: Map<string, string>; index: number; onOpenDetails: () => void }) {
-  const accept   = useAcceptAssignment();
-  const start    = useStartAssignment();
-  const complete = useCompleteAssignment();
-  const resolveReview = useResolveReviewAssignment();
-  const decline  = useDeclineAssignment();
-  const block    = useBlockAssignment();
-  const cancel   = useCancelAssignment();
-  const [acting, setActing] = useState<string | null>(null);
-
-  async function act(action: string) {
-    setActing(action);
-    try {
-      if (action === 'accept')        await accept.mutateAsync(task.id);
-      else if (action === 'start')    await start.mutateAsync(task.id);
-      else if (action === 'complete') await complete.mutateAsync({ id: task.id });
-      else if (action === 'decline')  await decline.mutateAsync({ id: task.id });
-      else if (action === 'block')    await block.mutateAsync({ id: task.id });
-      else if (action === 'cancel')   await cancel.mutateAsync({ id: task.id });
-      toast({ title: `Assignment ${action}ed` });
-    } catch {
-      toast({ title: 'Error', description: `Could not ${action} assignment.`, variant: 'destructive' });
-    } finally { setActing(null); }
-  }
-
-  async function resolveLowRiskReview() {
-    setActing('resolve_review');
-    try {
-      await resolveReview.mutateAsync({ id: task.id });
-      toast({ title: 'Review resolved', description: 'Linked Memory was marked reviewed and the assignment was completed.' });
-    } catch (err) {
-      toast({ title: 'Review still needs attention', description: errorMessage(err, 'Open the assignment details for the next step.'), variant: 'destructive' });
-    } finally {
-      setActing(null);
-    }
-  }
-
   const isOverdue = task.due_at && isPast(parseISO(task.due_at)) && !['completed', 'cancelled', 'declined'].includes(task.status);
   const assignedByName = actorMap.get(task.assigned_by) ?? task.assigned_by.slice(0, 8) + '…';
   const assignedToName = actorMap.get(task.assigned_to) ?? task.assigned_to.slice(0, 8) + '…';
-  const reviewResolveAllowed = canResolveLowRiskReview(task);
   const reviewDetail = reviewTypeDetail(task);
 
   return (
@@ -1248,21 +1394,7 @@ function AssignmentTableRow({ task, actorMap, index, onOpenDetails }: { task: As
         {task.due_at ? timeAgo(task.due_at) : '—'}
       </td>
       <td className="px-4 py-3">
-        <div className="flex gap-1.5">
-          <ActionBtn label="Details" icon={<Eye className="w-3 h-3" />} onClick={onOpenDetails} loading={false} color="ghost" />
-          {reviewResolveAllowed && <ActionBtn label="Mark reviewed" icon={<ShieldCheck className="w-3 h-3" />} onClick={resolveLowRiskReview} loading={acting === 'resolve_review'} color="success" />}
-          {ACTIVE_STATUSES.includes(task.status) && (
-            <>
-            {task.status === 'pending' && <>
-              <ActionBtn label="Accept" icon={<CheckCircle2 className="w-3 h-3" />} onClick={() => act('accept')} loading={acting === 'accept'} color="success" />
-              <ActionBtn label="Decline" icon={<XCircle className="w-3 h-3" />} onClick={() => act('decline')} loading={acting === 'decline'} color="ghost" />
-            </>}
-            {task.status === 'accepted' && <ActionBtn label="Start" icon={<Play className="w-3 h-3" />} onClick={() => act('start')} loading={acting === 'start'} color="primary" />}
-            {task.status === 'in_progress' && <ActionBtn label="Complete" icon={<CheckCircle2 className="w-3 h-3" />} onClick={() => act('complete')} loading={acting === 'complete'} color="success" />}
-            {task.status === 'blocked' && <ActionBtn label="Resume" icon={<Play className="w-3 h-3" />} onClick={() => act('start')} loading={acting === 'start'} color="primary" />}
-            </>
-          )}
-        </div>
+        <AssignmentActionControls task={task} onOpenDetails={onOpenDetails} />
       </td>
     </tr>
   );
@@ -1456,8 +1588,13 @@ export default function InboxPage() {
       >
         <div className="hidden h-9 rounded-xl border border-border bg-muted p-0.5 md:inline-flex md:mr-2">
           {([{ mode: 'card', icon: LayoutGrid }, { mode: 'table', icon: List }] as const).map(({ mode, icon: Icon }) => (
-            <button key={mode} onClick={() => setView(mode)}
-              className={`p-1.5 rounded-lg transition-all ${view === mode ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
+            <button
+              key={mode}
+              onClick={() => setView(mode)}
+              aria-label={mode === 'card' ? 'Card view' : 'Table view'}
+              title={mode === 'card' ? 'Card view' : 'Table view'}
+              className={`p-1.5 rounded-lg transition-all ${view === mode ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
+            >
               <Icon className="w-4 h-4" />
             </button>
           ))}

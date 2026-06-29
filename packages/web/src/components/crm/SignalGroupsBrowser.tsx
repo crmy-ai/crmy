@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ComponentType, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ComponentType, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -66,6 +66,38 @@ function statusTone(status: SignalGroup['status']) {
   if (status === 'promoted') return 'border-primary/20 bg-primary/10 text-primary';
   if (status === 'dismissed') return 'border-muted bg-muted text-muted-foreground';
   return 'border-border bg-muted/60 text-muted-foreground';
+}
+
+function signalGroupMatchesQuery(group: SignalGroup, rawQuery: string) {
+  const needle = rawQuery.trim().toLowerCase();
+  if (!needle) return true;
+  const members = Array.isArray(group.members) ? group.members : [];
+  const memberText = members.flatMap((member: any) => {
+    const entry = member.context_entry ?? {};
+    const evidence = Array.isArray(entry.evidence) ? entry.evidence : [];
+    return [
+      entry.title,
+      entry.body,
+      entry.source_label,
+      entry.source_ref,
+      member.source_label,
+      member.source_key,
+      ...evidence.flatMap((item: any) => [item.snippet, item.source_label, item.source_ref, item.source_url]),
+    ];
+  });
+  const haystack = [
+    group.title,
+    group.normalized_claim,
+    group.context_type,
+    group.subject_name,
+    group.subject_type,
+    group.status,
+    ...memberText,
+  ]
+    .filter(Boolean)
+    .map(value => String(value).toLowerCase())
+    .join(' ');
+  return haystack.includes(needle);
 }
 
 type SignalReadiness = NonNullable<SignalGroup['readiness']>;
@@ -974,7 +1006,7 @@ export function SignalGroupsBrowser({
   const [lastHandoffId, setLastHandoffId] = useState<string | null>(null);
   const query = q.trim();
   const { data, isLoading } = useSignalGroups({
-    attention_only: attentionOnly,
+    attention_only: query ? false : attentionOnly,
     q: query || undefined,
     status: activeFilters.status?.[0],
     subject_type: activeFilters.subject_type?.[0],
@@ -982,8 +1014,14 @@ export function SignalGroupsBrowser({
     limit: 50,
   }) as any;
   const groups: SignalGroup[] = data?.data ?? [];
-  const total = Number(data?.total ?? groups.length);
-  const selected = groups.find(g => g.id === selectedId) ?? null;
+  const apiTotal = Number(data?.total ?? groups.length);
+  const recentSignalGroupsRef = useRef<SignalGroup[]>([]);
+  const displayGroups = useMemo(() => {
+    if (!query || groups.length > 0) return groups;
+    return recentSignalGroupsRef.current.filter(group => signalGroupMatchesQuery(group, query));
+  }, [groups, query]);
+  const total = query && apiTotal === 0 && displayGroups.length > 0 ? displayGroups.length : apiTotal;
+  const selected = displayGroups.find(g => g.id === selectedId) ?? null;
   const detail = useSignalGroup(selectedId);
   const detailedGroup = (detail.data as any)?.signal_group ?? selected;
   const promote = usePromoteSignalGroup();
@@ -999,6 +1037,12 @@ export function SignalGroupsBrowser({
     return map;
   }, [contextTypesData]);
   const selectedParam = searchParams.get('signal_group_id');
+
+  useEffect(() => {
+    if (!query && groups.length > 0) {
+      recentSignalGroupsRef.current = groups;
+    }
+  }, [groups, query]);
 
   const openSignal = (id: string) => {
     setSelectedId(id);
@@ -1040,7 +1084,7 @@ export function SignalGroupsBrowser({
   };
 
   const filterConfigs: FilterConfig[] = useMemo(() => {
-    const contextTypes = Array.from(new Set(groups.map(group => group.context_type).filter(Boolean))).sort();
+    const contextTypes = Array.from(new Set(displayGroups.map(group => group.context_type).filter(Boolean))).sort();
     return [
       {
         key: 'status',
@@ -1070,7 +1114,7 @@ export function SignalGroupsBrowser({
         options: contextTypes.map(type => ({ value: type, label: type.replace(/_/g, ' ') })),
       },
     ];
-  }, [groups]);
+  }, [displayGroups]);
 
   const sortOptions: SortOption[] = [
     { key: 'updated_at', label: 'Updated' },
@@ -1102,7 +1146,7 @@ export function SignalGroupsBrowser({
 
   const groupedByStatus = useMemo(() => {
     const order: SignalGroup['status'][] = ['conflicting', 'blocked', 'ready', 'gathering', 'promoted', 'dismissed'];
-    const filtered = groups;
+    const filtered = displayGroups;
     if (sort) {
       return [...filtered].sort((a, b) => {
         const aValue = sort.key === 'updated_at'
@@ -1115,15 +1159,15 @@ export function SignalGroupsBrowser({
       });
     }
     return [...filtered].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
-  }, [groups, sort]);
+  }, [displayGroups, sort]);
 
   const relatedSignals = useMemo(() => {
     if (!detailedGroup) return [];
-    return groups
+    return displayGroups
       .filter(group => group.id !== detailedGroup.id)
       .filter(group => group.subject_id === detailedGroup.subject_id || group.context_type === detailedGroup.context_type)
       .slice(0, 4);
-  }, [detailedGroup, groups]);
+  }, [detailedGroup, displayGroups]);
 
   const onPromote = async (id: string) => {
     try {
@@ -1375,11 +1419,11 @@ export function SignalGroupsBrowser({
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
         {headerContent}
-        {!isLoading && groups.length > 0 && (
+        {!isLoading && displayGroups.length > 0 && (
           <p className="mb-3 text-xs text-muted-foreground">
             {attentionOnly && !query
-              ? `Showing ${groups.length.toLocaleString()} of ${total.toLocaleString()} Signals in the Review Queue: items ready to confirm, missing detail, needing another source, or waiting for approval/conflict review.`
-              : `Showing ${groups.length.toLocaleString()} of ${total.toLocaleString()} ${query ? 'matching ' : ''}Signals. Use search, record, status, and type filters to narrow large workspaces.`}
+              ? `Showing ${displayGroups.length.toLocaleString()} of ${total.toLocaleString()} Signals in the Review Queue: items ready to confirm, missing detail, needing another source, or waiting for approval/conflict review.`
+              : `Showing ${displayGroups.length.toLocaleString()} of ${total.toLocaleString()} ${query ? 'matching ' : ''}Signals. Use search, record, status, and type filters to narrow large workspaces.`}
           </p>
         )}
         {isLoading ? (
@@ -1501,7 +1545,7 @@ export function SignalGroupsBrowser({
                           <p className="line-clamp-2 text-sm text-muted-foreground"><span className="font-semibold">What's needed:</span> {blockerSummary}</p>
                         </div>
                       )}
-                      <CompactScoreBar label="Signal readiness" value={readiness.score} />
+                      <CompactScoreBar label="Signal readiness" value={readiness.score} threshold={readiness.threshold} />
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <SignalSubjectChip group={group} />
                         <span>{readiness.components.evidence_count} evidence</span>

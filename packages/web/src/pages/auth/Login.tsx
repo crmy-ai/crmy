@@ -224,12 +224,12 @@ export function LoginPage() {
   );
   const showDemoAccounts = mode === 'login' && dbStatus.status === 'ok' && dbStatus.setup?.demo_accounts_available === true;
   const workspaceName = dbStatus.tenant?.name?.trim() || 'CRMy Workspace';
-  const displayVersion = APP_VERSION !== 'unknown' ? APP_VERSION : dbStatus.version;
-  const serverVersionDiffers = Boolean(displayVersion && dbStatus.version && dbStatus.version !== displayVersion);
+  const appBuildVersion = APP_VERSION !== 'unknown' ? APP_VERSION : undefined;
+  const displayVersion = dbStatus.version ?? appBuildVersion;
+  const buildVersionDiffers = Boolean(appBuildVersion && dbStatus.version && appBuildVersion !== dbStatus.version);
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(124,58,237,0.14),transparent_34rem)]" />
       <button
         onClick={toggleTheme}
         className="fixed right-4 top-4 z-10 rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -238,13 +238,8 @@ export function LoginPage() {
         {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
       </button>
       <div className={`${cardClass} relative flex w-full max-w-md flex-col items-center`}>
-      <img
-        src={crMyLogo}
-        alt="CRMy"
-        className="-mb-2 h-32 w-32 object-contain sm:-mb-3 sm:h-40 sm:w-40"
-      />
       <Card className="w-full border-border/80 shadow-xl shadow-black/5">
-        <CardHeader className="relative items-center text-center">
+        <CardHeader className="relative text-left">
           {mode === 'register' && (
             <button
               onClick={() => switchMode('login')}
@@ -254,18 +249,25 @@ export function LoginPage() {
               <X className="w-5 h-5" />
             </button>
           )}
-          <div className="space-y-1">
-            <CardTitle className="font-brand text-2xl font-bold tracking-normal">
-              {mode === 'login' ? (
-                <>Sign in to <span className="text-primary">CRMy</span></>
-              ) : (
-                <>{isFirstRun ? 'Create your workspace' : 'Create your account'}</>
+          <div className="flex items-center gap-4">
+            <img
+              src={crMyLogo}
+              alt="CRMy"
+              className="h-24 w-24 flex-shrink-0 object-contain"
+            />
+            <div className="min-w-0 space-y-1">
+              <CardTitle className="font-brand text-2xl font-bold tracking-normal">
+                {mode === 'login' ? (
+                  <>Sign in to <span className="text-primary">CRMy</span></>
+                ) : (
+                  <>{isFirstRun ? 'Create your workspace' : 'Create your account'}</>
+                )}
+              </CardTitle>
+              <CardDescription>{TAGLINE}</CardDescription>
+              {dbStatus.status === 'ok' && (
+                <p className="text-xs text-muted-foreground/75">{workspaceName}</p>
               )}
-            </CardTitle>
-            <CardDescription>{TAGLINE}</CardDescription>
-            {dbStatus.status === 'ok' && (
-              <p className="text-xs text-muted-foreground/75">{workspaceName}</p>
-            )}
+            </div>
           </div>
           {mode === 'login' && isFirstRun && (
             <p className="pt-2 text-xs text-muted-foreground">
@@ -491,14 +493,14 @@ export function LoginPage() {
               )}
               {displayVersion && (
                 <>
-                  <dt>App version</dt>
+                  <dt>Version</dt>
                   <dd>v{displayVersion}</dd>
                 </>
               )}
-              {serverVersionDiffers && (
+              {buildVersionDiffers && appBuildVersion && (
                 <>
-                  <dt>Server version</dt>
-                  <dd>v{dbStatus.version}</dd>
+                  <dt>Web build</dt>
+                  <dd>v{appBuildVersion}</dd>
                 </>
               )}
             </dl>

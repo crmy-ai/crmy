@@ -308,6 +308,20 @@ export default function ContextPage() {
           ))}
         </div>
         <div className="ml-auto flex min-w-max items-center gap-2 pb-2">
+          <Link
+            to="/activities"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <CalendarDays className="h-3.5 w-3.5" />
+            Activity
+          </Link>
+          <Link
+            to="/emails"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Mail className="h-3.5 w-3.5" />
+            Email
+          </Link>
           <button
             type="button"
             onClick={() => setTab('connectors')}
@@ -318,7 +332,7 @@ export default function ContextPage() {
             }`}
           >
             <FileText className="h-3.5 w-3.5" />
-            Connectors
+            Manage Sources
           </button>
           <button
             type="button"

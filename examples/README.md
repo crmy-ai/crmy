@@ -29,5 +29,7 @@ These examples use the seeded Northstar Labs demo and verify:
 
 1. record resolution by name,
 2. `briefing_get`,
-3. Signals needing attention,
-4. a safe next action grounded in evidence.
+3. `action_context_get`,
+4. Signals needing attention,
+5. lineage proof,
+6. a safe next action grounded in evidence.

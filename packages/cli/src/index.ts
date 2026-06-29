@@ -69,6 +69,8 @@ import { toolsCommand } from './commands/tools.js';
 import { evalCommand } from './commands/eval.js';
 import { certifyCommand } from './commands/certify.js';
 import { updateCommand } from './commands/update.js';
+import { installerMetadataCommand } from './commands/installer-metadata.js';
+import { modelsCommand } from './commands/models.js';
 
 const program = new Command();
 
@@ -115,6 +117,8 @@ program.addCommand(toolsCommand());
 program.addCommand(evalCommand());
 program.addCommand(certifyCommand());
 program.addCommand(updateCommand());
+program.addCommand(modelsCommand());
+program.addCommand(installerMetadataCommand());
 program.addCommand(helpCommand());
 
 // Top-level `crmy login` shortcut (delegates to `crmy auth login`)

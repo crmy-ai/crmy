@@ -154,6 +154,8 @@ test('Eval harness has a local CLI command and deterministic runner wiring', asy
   assert.match(runnerSource, /raw_context_custom_registry/);
   assert.match(runnerSource, /record_resolution/);
   assert.match(runnerSource, /retrieval_quality/);
+  assert.match(runnerSource, /high_impact_autopromote/);
+  assert.match(runnerSource, /high_impact_autopromote_false_allow/);
   assert.match(runnerSource, /action_context/);
   assert.match(runnerSource, /source_attribution/);
   assert.match(runnerSource, /tool_choice/);
@@ -369,7 +371,11 @@ test('agent harness setup avoids npx prompts and includes systems scopes', async
   assert.match(initSource, /registration_status = 'approved'/);
   assert.match(initSource, /chooseAgentSetup/);
   assert.match(initSource, /CRMY_AGENT_PROVIDER/);
+  assert.match(initSource, /--server-url <url>/);
+  assert.match(initSource, /process\.env\.CRMY_SERVER_URL/);
   assert.match(doctorSource, /Workspace Agent online/);
+  assert.match(doctorSource, /--skip-model-check/);
+  assert.match(doctorSource, /connector-free demo and review-only mode can still run/);
   assert.match(doctorSource, /CRMY_API_KEY is valid for this workspace/);
   assert.match(doctorSource, /does not match this database/);
   assert.match(providerSource, /export const PROVIDERS/);
@@ -388,6 +394,70 @@ test('agent harness setup avoids npx prompts and includes systems scopes', async
     assert.match(providerSource, new RegExp(`id: '${provider}'`));
   }
   assert.match(webProviderSource, /from '@crmy\/shared'/);
+});
+
+test('shell installer stays aligned with first-run proof and provider catalog', async () => {
+  const installer = await read('scripts/install.sh');
+  const providerSource = await read('packages/shared/src/agent-providers.ts');
+  const certifications = await read('packages/shared/src/model-certifications.ts');
+  const cliIndex = await read('packages/cli/src/index.ts');
+  const metadataCommand = await read('packages/cli/src/commands/installer-metadata.ts');
+  const modelCatalog = await read('packages/cli/src/model-catalog.ts');
+  const modelsCommand = await read('packages/cli/src/commands/models.ts');
+  const initSource = await read('packages/cli/src/commands/init.ts');
+  const helpSource = await read('packages/cli/src/commands/help.ts');
+
+  assert.match(installer, /SKIP_QUICKSTART=false/);
+  assert.match(installer, /--skip-quickstart\s*\)/);
+  assert.match(installer, /run_quickstart_check\(\)/);
+  assert.match(installer, /quickstart --no-seed/);
+  assert.match(installer, /CRMY_SERVER_URL=http:\/\/localhost:\$PORT/);
+  assert.match(installer, /doctor --port "\$PORT"/);
+  assert.match(installer, /--skip-model-check/);
+  assert.match(installer, /model_is_precertified\(\)/);
+  assert.match(installer, /INSTALLER_METADATA_JSON/);
+  assert.match(installer, /_installer-metadata --json/);
+  assert.match(installer, /catalog_query/);
+  assert.match(installer, /cli_supports_installer_metadata/);
+  assert.match(installer, /Automatic Memory: enabled by CRMy-published model certification/);
+  assert.match(installer, /review-only until this model passes 'crmy certify --output \.\/eval-runs'/);
+  assert.match(cliIndex, /installerMetadataCommand/);
+  assert.match(cliIndex, /modelsCommand/);
+  assert.match(metadataCommand, /PROVIDERS/);
+  assert.match(metadataCommand, /PRECERTIFIED_MODEL_REGISTRY/);
+  assert.match(metadataCommand, /providerModelsFromCatalog/);
+  assert.match(initSource, /providerModelsFromCatalog/);
+  assert.match(initSource, /precertifiedCertificationForModel/);
+  assert.match(initSource, /model_certification_status = EXCLUDED\.model_certification_status/);
+  assert.match(initSource, /--certify-model/);
+  assert.match(initSource, /--no-certify-model/);
+  assert.match(initSource, /crmy certify --output/);
+  assert.match(initSource, /CRMy won\\'t let an unproven model invent customer truth/);
+  assert.match(helpSource, /models\s+List, refresh, and inspect/);
+  assert.match(modelCatalog, /model-catalog\.json/);
+  assert.match(modelCatalog, /refreshOpenRouterModels/);
+  assert.match(modelCatalog, /refreshOllamaModels/);
+  assert.match(modelCatalog, /findPrecertifiedModel/);
+  assert.match(modelsCommand, /command\('refresh'\)/);
+  assert.match(modelsCommand, /command\('probe <provider> <model>'\)/);
+  assert.match(modelsCommand, /review_only_until_certified/);
+  assert.match(modelsCommand, /--verbose/);
+  assert.match(modelsCommand, /Use --verbose for labels, descriptions, and context metadata/);
+
+  assert.doesNotMatch(installer, /provider_model_option\(\)\s*\{\s*case/s);
+  assert.doesNotMatch(installer, /model_is_precertified\(\)\s*\{[\s\S]*?case "\$AGENT_PROVIDER\|\$base_url\|\$AGENT_MODEL"/);
+  assert.doesNotMatch(installer, /claude-sonnet-4-20250514\|Claude Sonnet/);
+  assert.doesNotMatch(installer, /gpt-5\.2\|GPT-5\.2/);
+
+  for (const match of certifications.matchAll(/provider: '([^']+)',[\s\S]*?base_url: '([^']+)',[\s\S]*?model: '([^']+)'/g)) {
+    const [, provider, baseUrl, model] = match;
+    const tuple = `${provider}|${baseUrl}|${model}`;
+    assert.doesNotMatch(installer, new RegExp(tuple.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+
+  for (const model of ['claude-fable-5', 'gpt-5.5', 'gemini-3.5-flash', 'mistral-medium-3-5+2', 'qwen3:8b']) {
+    assert.match(providerSource, new RegExp(model.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
 });
 
 test('workspace agent provider catalog and backup config stay wired', async () => {
@@ -515,6 +585,7 @@ test('first-run setup persists a dedicated stored-secret encryption key', async 
   const guide = await read('docs/guide.md');
 
   assert.match(configSource, /encryptionKey\?: string/);
+  assert.match(configSource, /fs\.writeFileSync\(localPath, json, \{ mode: 0o600 \}\)/);
   assert.match(configCommandSource, /encryptionKey: config\.encryptionKey \? '\*\*\*' : undefined/);
   assert.match(initSource, /encryptionKey = crypto\.randomBytes\(32\)\.toString\('hex'\)/);
   assert.match(initSource, /process\.env\.CRMY_ENCRYPTION_KEY = encryptionKey/);

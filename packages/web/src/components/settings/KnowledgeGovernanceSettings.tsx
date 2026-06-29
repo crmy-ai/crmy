@@ -12,7 +12,7 @@
  * an explicit, separate action from internal approval.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { toast } from '@/hooks/use-toast';
 import {
   Sheet,
@@ -37,20 +37,22 @@ import {
   useKnowledgeClaims, useReviewKnowledgeClaim, useDetectKnowledgeConflicts,
   type KnowledgeClaimListFilters,
 } from '@/api/hooks';
+import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { Switch } from '@/components/ui/switch';
 import type { KnowledgeClaimRecord, KnowledgeReviewDecision } from '@crmy/shared';
 import {
   BookOpen, CheckCircle2, XCircle, Archive, Clock, RotateCcw, ShieldCheck,
-  AlertTriangle, Search, GitCompareArrows, Loader2, Filter, Eye, ExternalLink, MoreHorizontal,
+  AlertTriangle, GitCompareArrows, Loader2, Eye, ExternalLink, MoreHorizontal,
 } from 'lucide-react';
 
 const btnPrimary = 'inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40';
 const btnApprove = 'inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-600/90 disabled:opacity-40';
 const btnApproveOutline = 'inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-emerald-500/30 px-3 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-400';
 const btnOutline = 'inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-40';
-const inputCls = 'h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 
 type FilterKey = 'needs_review' | 'all' | 'active' | 'stale' | 'conflicting' | 'pending';
 type KnowledgeTypeFilter = 'all' | KnowledgeClaimRecord['knowledge_type'];
+type KnowledgeSortKey = 'updated_at' | 'confidence' | 'source_priority' | 'title';
 
 const FILTERS: { key: FilterKey; label: string; filters: KnowledgeClaimListFilters }[] = [
   { key: 'needs_review', label: 'Needs review', filters: { needs_review: true } },
@@ -66,6 +68,26 @@ const TYPE_FILTERS: { key: KnowledgeTypeFilter; label: string }[] = [
   { key: 'company', label: 'Company' },
   { key: 'product', label: 'Product' },
   { key: 'competitor', label: 'Competitor' },
+];
+
+const KNOWLEDGE_FILTER_CONFIGS: FilterConfig[] = [
+  {
+    key: 'review_state',
+    label: 'Review state',
+    options: FILTERS.filter(filter => filter.key !== 'all').map(filter => ({ value: filter.key, label: filter.label })),
+  },
+  {
+    key: 'knowledge_type',
+    label: 'Type',
+    options: TYPE_FILTERS.filter(filter => filter.key !== 'all').map(filter => ({ value: filter.key, label: filter.label })),
+  },
+];
+
+const KNOWLEDGE_SORT_OPTIONS: SortOption[] = [
+  { key: 'updated_at', label: 'Updated' },
+  { key: 'confidence', label: 'Confidence' },
+  { key: 'source_priority', label: 'Source priority' },
+  { key: 'title', label: 'Title' },
 ];
 
 function Badge({ tone, children }: { tone: string; children: React.ReactNode }) {
@@ -152,6 +174,15 @@ function customerGate(claim: KnowledgeClaimRecord, expired: boolean): { label: s
     return { label: 'internal only', tone: 'border-border bg-muted text-muted-foreground' };
   }
   return { label: 'trusted', tone: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600' };
+}
+
+function knowledgeDetailLabel(claim: KnowledgeClaimRecord, expired: boolean): string {
+  const gate = customerGate(claim, expired).label;
+  if (gate === 'trusted') return 'Trusted Fact';
+  if (gate === 'fact candidate') return 'Fact Candidate';
+  if (gate === 'internal only') return 'Internal Fact';
+  if (gate === 'retired') return 'Retired Fact';
+  return 'Fact Needs Review';
 }
 
 function isClaimExpired(claim: KnowledgeClaimRecord): boolean {
@@ -408,6 +439,7 @@ function ClaimCard({ claim, onOpen }: { claim: KnowledgeClaimRecord; onOpen: (cl
       className="group flex min-h-[14rem] cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-colors hover:border-primary/30 hover:bg-card/95 focus:outline-none focus:ring-2 focus:ring-ring"
       role="button"
       tabIndex={0}
+      aria-label={`View knowledge fact details for ${claim.title}`}
       onClick={() => onOpen(claim)}
       onKeyDown={(event) => handleOpenKey(event, () => onOpen(claim))}
     >
@@ -425,7 +457,7 @@ function ClaimCard({ claim, onOpen }: { claim: KnowledgeClaimRecord; onOpen: (cl
           <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">{claim.title}</h3>
           <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{claim.summary || claim.body}</p>
           {typeof claim.confidence === 'number' && (
-            <CompactScoreBar label="Confidence" value={claim.confidence} />
+            <CompactScoreBar label="Confidence" value={claim.confidence} colorMode="neutral" />
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span className="rounded-full border border-border/70 bg-background/50 px-2.5 py-1 font-medium">{claim.category}</span>
@@ -439,6 +471,10 @@ function ClaimCard({ claim, onOpen }: { claim: KnowledgeClaimRecord; onOpen: (cl
                 {expired ? `Expired ${formatDate(claim.valid_until)}` : `Valid until ${formatDate(claim.valid_until)}`}
               </span>
             )}
+          </div>
+          <div className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary opacity-80 transition-opacity group-hover:opacity-100">
+            <Eye className="h-3.5 w-3.5" />
+            View details
           </div>
         </div>
       </div>
@@ -456,6 +492,29 @@ function freshnessLabel(claim: KnowledgeClaimRecord, expired: boolean): string {
   if (claim.last_verified_at) return `Verified ${formatDate(claim.last_verified_at)}`;
   if (claim.valid_until) return `Valid until ${formatDate(claim.valid_until)}`;
   return 'Current';
+}
+
+function compactTrustLabel(claim: KnowledgeClaimRecord, expired: boolean): string {
+  if (claim.status === 'deprecated' || claim.status === 'rejected') return 'Retired';
+  if (claim.status === 'conflicting') return 'Needs review: conflict';
+  if (!claim.grounded) return 'Needs review: ungrounded';
+  if (claim.status === 'stale' || expired) return 'Needs review: stale';
+  if (claim.approval_status !== 'approved') return 'Fact candidate';
+  if (!claim.approved_for_external_use || claim.visibility !== 'external') return 'Internal only';
+  return 'Customer-ready';
+}
+
+function compactTrustDotClass(claim: KnowledgeClaimRecord, expired: boolean): string {
+  if (claim.status === 'deprecated' || claim.status === 'rejected') return 'bg-muted-foreground/50';
+  if (claim.status === 'conflicting') return 'bg-destructive';
+  if (!claim.grounded || claim.status === 'stale' || expired || claim.approval_status !== 'approved') return 'bg-warning';
+  if (!claim.approved_for_external_use || claim.visibility !== 'external') return 'bg-muted-foreground';
+  return 'bg-emerald-500';
+}
+
+function formatCompactCategory(category?: string): string {
+  if (!category) return 'Uncategorized';
+  return category.replace(/[_-]/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
 }
 
 function KnowledgeClaimsTable({
@@ -482,7 +541,7 @@ function KnowledgeClaimsTable({
           </thead>
           <tbody>
             {claims.map((claim, index) => {
-              const { expired, gate } = claimReviewState(claim);
+              const { expired } = claimReviewState(claim);
               return (
                 <tr
                   key={claim.id}
@@ -503,16 +562,17 @@ function KnowledgeClaimsTable({
                     <div className="line-clamp-1">{claimSourceLabel(claim)}</div>
                     <div className="mt-1 text-xs">{claim.source_priority}</div>
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex max-w-[13rem] flex-wrap gap-1.5">
-                      <Badge tone={gate.tone}>{gate.label}</Badge>
-                      <Badge tone={APPROVAL_TONE[claim.approval_status] ?? APPROVAL_TONE.unapproved}>{APPROVAL_LABEL[claim.approval_status] ?? claim.approval_status}</Badge>
+                  <td className="max-w-[12rem] px-4 py-3">
+                    <div className="flex min-w-0 items-center gap-2 whitespace-nowrap text-xs font-semibold text-foreground">
+                      <span className={`h-2 w-2 flex-shrink-0 rounded-full ${compactTrustDotClass(claim, expired)}`} />
+                      <span className="truncate">{compactTrustLabel(claim, expired)}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex max-w-[12rem] flex-wrap gap-1.5">
-                      <Badge tone="border-info/30 bg-info/10 text-info">{typeLabel(claim.knowledge_type)}</Badge>
-                      <Badge tone="border-border bg-muted text-muted-foreground">{claim.category}</Badge>
+                  <td className="max-w-[13rem] px-4 py-3">
+                    <div className="truncate whitespace-nowrap text-xs text-muted-foreground">
+                      <span className="font-semibold text-foreground">{typeLabel(claim.knowledge_type)}</span>
+                      <span className="px-1.5 text-muted-foreground/70">/</span>
+                      <span>{formatCompactCategory(claim.category)}</span>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{freshnessLabel(claim, expired)}</td>
@@ -582,6 +642,7 @@ function KnowledgeClaimDrawer({
 }) {
   const expired = claim ? isClaimExpired(claim) : false;
   const gate = claim ? customerGate(claim, expired) : null;
+  const detailLabel = claim ? knowledgeDetailLabel(claim, expired) : 'Knowledge Fact';
 
   return (
     <Sheet open={Boolean(claim)} onOpenChange={open => { if (!open) onClose(); }}>
@@ -598,13 +659,13 @@ function KnowledgeClaimDrawer({
               </div>
               <SheetTitle className="font-display text-lg leading-snug">{claim.title}</SheetTitle>
               <SheetDescription>
-                Trusted Fact detail, source provenance, governance, and scope.
+                Knowledge fact detail, source provenance, governance, and scope.
               </SheetDescription>
             </SheetHeader>
 
             <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
               <ContextClaimPanel
-                label="Trusted Fact"
+                label={detailLabel}
                 tone="memory"
                 title={claim.body || claim.title}
                 chips={(
@@ -618,7 +679,7 @@ function KnowledgeClaimDrawer({
                   </div>
                 )}
                 score={typeof claim.confidence === 'number' ? (
-                  <ClaimScoreBar label="Confidence" value={claim.confidence} />
+                  <ClaimScoreBar label="Confidence" value={claim.confidence} colorMode="neutral" />
                 ) : undefined}
                 lifecycle={(
                   <>
@@ -705,11 +766,23 @@ function ConflictsPanel() {
         <p className="max-w-xl text-xs leading-5 text-muted-foreground">
           CRMy already keeps stale, conflicting, unapproved, and ungrounded facts out of customer-facing retrieval. Use this scan when you want to review competing facts across sources.
         </p>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-            <input type="checkbox" checked={applyResolution} onChange={(e) => setApplyResolution(e.target.checked)} />
-            Mark lower-priority fact conflicting
-          </label>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
+            <Switch
+              id="knowledge-conflict-apply"
+              checked={applyResolution}
+              onCheckedChange={setApplyResolution}
+              aria-label="Auto-mark lower-priority facts conflicting"
+            />
+            <label htmlFor="knowledge-conflict-apply" className="cursor-pointer">
+              <span className="block text-xs font-semibold text-foreground">
+                {applyResolution ? 'Auto-mark conflicts' : 'Review only'}
+              </span>
+              <span className="block text-[11px] text-muted-foreground">
+                Lower-priority facts {applyResolution ? 'will be marked conflicting' : 'stay unchanged'}
+              </span>
+            </label>
+          </div>
           <button
             className={btnPrimary}
             disabled={detect.isPending}
@@ -747,8 +820,8 @@ function ConflictsPanel() {
 export default function KnowledgeGovernanceSettings({ viewMode = 'cards' }: { viewMode?: 'cards' | 'table' } = {}) {
   const [typeFilter, setTypeFilter] = useState<KnowledgeTypeFilter>('all');
   const [filterKey, setFilterKey] = useState<FilterKey>('needs_review');
-  const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [selectedClaim, setSelectedClaim] = useState<KnowledgeClaimRecord | null>(null);
 
   const active = FILTERS.find(f => f.key === filterKey)!;
@@ -761,63 +834,73 @@ export default function KnowledgeGovernanceSettings({ viewMode = 'cards' }: { vi
   const claims = data?.claims ?? [];
   const noKnowledgeConfigured = filterKey === 'all' && typeFilter === 'all' && !query && !isLoading && claims.length === 0;
   const visibleFactCount = data?.count ?? claims.length;
+  const toolbarFilters = useMemo(() => {
+    const next: Record<string, string[]> = {};
+    if (filterKey !== 'all') next.review_state = [filterKey];
+    if (typeFilter !== 'all') next.knowledge_type = [typeFilter];
+    return next;
+  }, [filterKey, typeFilter]);
+  const sortedClaims = useMemo(() => {
+    if (!sort) return claims;
+    const valueFor = (claim: KnowledgeClaimRecord, key: KnowledgeSortKey) => {
+      if (key === 'updated_at') return new Date(claim.updated_at ?? 0).getTime();
+      if (key === 'confidence') return typeof claim.confidence === 'number' ? claim.confidence : -1;
+      if (key === 'source_priority') return claim.source_priority ?? '';
+      return claim.title ?? '';
+    };
+    return [...claims].sort((a, b) => {
+      const aValue = valueFor(a, sort.key as KnowledgeSortKey);
+      const bValue = valueFor(b, sort.key as KnowledgeSortKey);
+      const result = typeof aValue === 'number' && typeof bValue === 'number'
+        ? aValue - bValue
+        : String(aValue).localeCompare(String(bValue));
+      return sort.dir === 'asc' ? result : -result;
+    });
+  }, [claims, sort]);
+
+  const handleFilterChange = (key: string, values: string[]) => {
+    const selected = values.at(-1);
+    if (key === 'review_state') {
+      setFilterKey((selected as FilterKey | undefined) ?? 'all');
+      return;
+    }
+    if (key === 'knowledge_type') {
+      setTypeFilter((selected as KnowledgeTypeFilter | undefined) ?? 'all');
+    }
+  };
+
+  const handleSortChange = (key: string) => {
+    setSort(prev => (prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'title' ? 'asc' : 'desc' }));
+  };
+
+  const clearFilters = () => {
+    setFilterKey('all');
+    setTypeFilter('all');
+    setQuery('');
+  };
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-border bg-card">
-        <div className="flex flex-col gap-3 border-b border-border px-3 py-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 items-center gap-2">
-            <BookOpen className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold text-foreground">Trusted Facts</span>
-            <span className="text-xs text-muted-foreground">{formatFactCount(visibleFactCount)} shown</span>
-          </div>
-          <form
-            className="flex min-w-0 items-center gap-2"
-            onSubmit={(e) => { e.preventDefault(); setQuery(searchInput.trim()); }}
-          >
-            <div className="relative w-full sm:w-64">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input
-                className={`${inputCls} w-full pl-8`}
-                placeholder="Search facts..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-              />
+      <div className="-mx-4 border-b border-border bg-background md:-mx-6">
+        <ListToolbar
+          searchValue={query}
+          onSearchChange={setQuery}
+          searchPlaceholder="Search Trusted Facts..."
+          filters={KNOWLEDGE_FILTER_CONFIGS}
+          activeFilters={toolbarFilters}
+          onFilterChange={handleFilterChange}
+          onClearFilters={clearFilters}
+          sortOptions={KNOWLEDGE_SORT_OPTIONS}
+          currentSort={sort}
+          onSortChange={handleSortChange}
+          entityType="knowledge"
+          searchSuffix={(
+            <div className="hidden h-9 items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-xs font-medium text-muted-foreground md:inline-flex">
+              <BookOpen className="h-3.5 w-3.5 text-primary" />
+              {formatFactCount(visibleFactCount)}
             </div>
-          </form>
-        </div>
-
-        <div className="flex flex-col gap-3 px-3 py-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <Filter className="h-3.5 w-3.5" />
-              Type
-            </span>
-            {TYPE_FILTERS.map(f => (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => setTypeFilter(f.key)}
-                className={`h-8 rounded-lg border px-3 text-xs font-medium transition-colors ${typeFilter === f.key ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status</span>
-            {FILTERS.map(f => (
-              <button
-                key={f.key}
-                onClick={() => setFilterKey(f.key)}
-                className={`h-8 rounded-lg border px-3 text-xs font-medium transition-colors ${filterKey === f.key ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-        </div>
+          )}
+        />
       </div>
 
       <ConflictsPanel />
@@ -856,10 +939,10 @@ export default function KnowledgeGovernanceSettings({ viewMode = 'cards' }: { vi
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">{formatFactCount(visibleFactCount)}</p>
           {viewMode === 'table' ? (
-            <KnowledgeClaimsTable claims={claims} onOpen={setSelectedClaim} />
+            <KnowledgeClaimsTable claims={sortedClaims} onOpen={setSelectedClaim} />
           ) : (
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {claims.map(c => <ClaimCard key={c.id} claim={c} onOpen={setSelectedClaim} />)}
+              {sortedClaims.map(c => <ClaimCard key={c.id} claim={c} onOpen={setSelectedClaim} />)}
             </div>
           )}
         </div>
