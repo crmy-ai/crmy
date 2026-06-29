@@ -1,6 +1,6 @@
 # CRMy User Guide
 
-Complete documentation for CRMy, an open-source governed context layer for customer-facing agents. CRMy ingests transcripts, notes, emails, CRM changes, and other customer data; extracts source-grounded Signals; promotes confirmed Memory when policy allows; and serves Action Context over MCP, REST, CLI, and the web UI. It works connector-free (transcripts, notes, and emails are enough); CRM and warehouse systems of record are an optional upgrade.
+Complete documentation for CRMy, an open-source governed context layer for customer-facing agents. Use CRMy when an agent needs to act on customer context but must know what the customer actually said, what is stale or inferred, which actions are safe, and what proof exists. CRMy ingests transcripts, notes, emails, CRM changes, and other customer data; turns them into source-grounded Signals and confirmed Memory; and serves Action Context over MCP, REST, CLI, and the web UI so agents can act with evidence, policy, freshness checks, and receipts. It works connector-free (transcripts, notes, and emails are enough); CRM and warehouse systems of record are an optional upgrade.
 
 New here? Run `npx -y @crmy/cli init --demo` then `npx -y @crmy/cli quickstart` to see the connector-free path end to end, or jump to [Getting Started](#getting-started).
 
@@ -2797,6 +2797,8 @@ DELETE /api/v1/custom-fields/:id
 CRMy is the policy boundary between agent inference and operational change. Agents can infer Signals, draft recommendations, search, summarize, ingest Source, and prepare work freely. Actions that affect customers, forecast, assignments, Current Memory, or systems of record pass through scopes, Action Policies, review when required, and audit receipts.
 
 Action Context is the tool agents should use before preparing meaningful customer action. It is not a blanket approval requirement. It gives the agent one compact packet with Memory, Signals, stale or conflicting context, source authority, allowed actions, warnings, expected proof, and review requirements when risk demands them.
+
+The portable preflight contract is versioned as `contract_version: "crmy.action_context.v1"` and is the same packet across MCP `action_context_get`, REST `POST /api/v1/action-context`, CLI `crmy action-context --json`, and Workspace Agent internal calls. The stable v1 fields are `operating_mode`, `readiness`, `policy`, `source_posture`, `allowed_actions`, `human_unblock`, `proof`, `next_tools`, and `context_packing`. The richer `briefing`, `checks`, and `action_packet` fields remain available for detailed UI and debugging flows.
 
 Every response includes `action_packet`, an agent-facing decision packet:
 

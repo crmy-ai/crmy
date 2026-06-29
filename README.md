@@ -7,10 +7,10 @@
 <h2 align="center">Open-source governed context for customer-facing agents</h2>
 
 <p align="center">
-  <strong>Source-grounded Signals, confirmed Memory, Action Context, and audit receipts.</strong>
+  <strong>Messy customer context in. Agent-ready Signals, Memory, Action Context, and receipts out.</strong>
 </p>
 <p align="center">
-  CRMy is developer infrastructure for agents that need to work with customer context safely. It ingests transcripts, notes, emails, and CRM changes, extracts source-grounded Signals, promotes confirmed Memory when policy allows, and serves Action Context over MCP, REST, CLI, and the web UI. Agents can distinguish evidence from inference, see stale or risky claims, route approvals to humans, and leave an auditable trail for every action.
+  CRMy is developer infrastructure for customer-facing agents that need to act on evidence, not unsupported prompt context. It turns transcripts, notes, emails, and CRM changes into source-grounded Signals and confirmed Memory, then serves Action Context over MCP, REST, CLI, and the web UI so agents know what is safe to say, what is stale or inferred, what needs approval, and what proof was recorded.
 </p>
 
 <p align="center">
@@ -70,7 +70,7 @@ Prefer the manual path, or want to see exactly what gets seeded? Use the <a href
 
 ## Why CRMy
 
-Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. They still hit walls when the context they need to rely on is scattered across CRM fields, meeting transcripts, emails, notes, calendar events, and random documents.
+Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. The hard part is deciding what they are allowed to trust and what they are allowed to do. Raw CRM fields and pasted transcript snippets do not tell an agent whether a claim came from the customer, whether it is stale, whether it conflicts with another source, or whether a proposed action needs approval.
 
 Without a governed context layer, agents can't answer the most critical questions:
 
@@ -81,15 +81,17 @@ Without a governed context layer, agents can't answer the most critical question
 - Does this customer email, CRM update, or record change need human approval?
 - What proof should exist after the agent acts?
 
-CRMy answers these questions for your agents. Instead of dumping raw records into a prompt, it gives the agent governed customer context, the warnings and policy it needs, and clear boundaries on what it may do. Then it records what happened. In short, CRMy turns messy customer data into safe, provable agent action:
+CRMy answers these questions before the agent acts. Instead of dumping raw records into a prompt, it gives the agent source-grounded context, freshness and policy checks, action boundaries, human-review paths, and receipts. That makes CRMy useful when an agent is moving from "summarize this account" to "draft the customer email," "update the forecast," "create the handoff," or "write back to the CRM."
+
+In short, CRMy turns messy customer context into safe, provable agent action:
 
 ```text
-Messy customer data  ->  Governed context  ->  Safe agent actions  ->  Proof at every step
+Messy customer context  ->  Governed context  ->  Safe agent actions  ->  Proof at every step
 ```
 
 Want proof? Try the <a href="#local-demo">local demo</a> below to see an agent resolve a customer, get a governed briefing, check what is safe to act on, and prove lineage.
 
-CRMy is built for teams creating customer-facing agents that need to work safely with real GTM data.
+CRMy is built for teams creating customer-facing agents that need production-grade context discipline around real GTM data.
 
 | Agent need | What CRMy provides |
 |---|---|

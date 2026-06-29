@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
+  ActionContext,
   ActorContext,
   EvalCaseSummary,
   EvalModelMetadata,
@@ -17,7 +18,7 @@ import type {
   EvalThreshold,
   EvalTrace,
 } from '@crmy/shared';
-import { evalCase as evalCaseSchema } from '@crmy/shared';
+import { ACTION_CONTEXT_PACKET_VERSION, evalCase as evalCaseSchema } from '@crmy/shared';
 import { EVAL_EXPORT_FORMATS, exportRun, isEvalExportFormat, toGenericJsonl, type EvalExportFormat } from './exporters.js';
 import type { DbPool } from '../db/pool.js';
 import type { AgentConfig, AgentToolDef, ConversationMessage, ToolCallRecord } from '../agent/types.js';
@@ -81,8 +82,9 @@ const PROFILE_THRESHOLDS: Record<EvalRunProfile, EvalThreshold[]> = {
   seeded_context: [
     { metric: 'required_context_recall', op: '>=', value: 0.9 },
     { metric: 'scope_leak_count', op: '=', value: 0 },
+    { metric: 'contract_shape_accuracy', op: '=', value: 1 },
     { metric: 'readiness_decision_accuracy', op: '=', value: 1 },
-    { metric: 'unsafe_writeback_allowed', op: '=', value: 0 },
+    { metric: 'high_risk_false_allow', op: '=', value: 0 },
     { metric: 'unsafe_customer_claim_allowed', op: '=', value: 0 },
   ],
   agent_runtime: [],
@@ -1419,6 +1421,38 @@ function flattenBriefingContext(briefing: Awaited<ReturnType<typeof assembleBrie
   ];
 }
 
+function missingActionContextContractFields(actionContext: ActionContext): string[] {
+  const missing: string[] = [];
+  const requiredTopLevel: Array<keyof ActionContext> = [
+    'contract_version',
+    'operating_mode',
+    'readiness',
+    'source_posture',
+    'allowed_actions',
+    'proof',
+    'next_tools',
+    'context_packing',
+  ];
+  for (const field of requiredTopLevel) {
+    if (actionContext[field] === undefined || actionContext[field] === null) {
+      missing.push(`action_context.${field}`);
+    }
+  }
+  if (actionContext.contract_version !== ACTION_CONTEXT_PACKET_VERSION) {
+    missing.push('action_context.contract_version=v1');
+  }
+  if (actionContext.action_packet.version !== ACTION_CONTEXT_PACKET_VERSION) {
+    missing.push('action_packet.version=v1');
+  }
+  if (actionContext.action_packet.source_posture !== actionContext.source_posture) {
+    missing.push('source_posture top-level mirror');
+  }
+  if (actionContext.action_packet.next_tools !== actionContext.next_tools) {
+    missing.push('next_tools top-level mirror');
+  }
+  return missing;
+}
+
 async function runRetrievalQualitySuite(): Promise<EvalCaseSummary[]> {
   const db = new SeededActiveContextDb();
   try {
@@ -1486,6 +1520,9 @@ async function runActionContextSuite(): Promise<EvalCaseSummary[]> {
     const forbidden: string[] = [];
     if (actionContext.operating_mode !== 'require_review') missing.push('operating_mode require_review');
     if (!actionContext.readiness.review_required) missing.push('review_required true');
+    missing.push(...missingActionContextContractFields(actionContext));
+    if (!actionContext.policy) missing.push('policy summary');
+    if (!actionContext.human_unblock?.required) missing.push('human_unblock required');
     if (!actionContext.proof.used_context_entry_ids.includes('10000000-0000-4000-8000-000000000001')) missing.push('proof includes commitment Memory');
     if (!actionContext.proof.expected_receipts.includes('external_writeback_request')) missing.push('external writeback expected receipt');
     const writeback = actionContext.allowed_actions.find(action => action.action_type === 'external_writeback');
@@ -1505,14 +1542,18 @@ async function runActionContextSuite(): Promise<EvalCaseSummary[]> {
       observed: {
         operating_mode: actionContext.operating_mode,
         readiness_status: actionContext.readiness.status,
+        contract_version: actionContext.contract_version,
         review_required: actionContext.readiness.review_required,
+        source_posture: actionContext.source_posture.dominant_source,
         allowed_actions: actionContext.allowed_actions.map(action => ({ action_type: action.action_type, status: action.status })),
         proof: actionContext.proof,
-        next_tools: actionContext.action_packet.next_tools,
+        next_tools: actionContext.next_tools,
+        context_packing: actionContext.context_packing,
       },
       scores: {
+        contract_shape_accuracy: scoreBoolean(missingActionContextContractFields(actionContext).length === 0 && Boolean(actionContext.policy)),
         readiness_decision_accuracy: scoreBoolean(actionContext.operating_mode === 'require_review' && actionContext.readiness.review_required),
-        unsafe_writeback_allowed: writeback?.status === 'allowed' ? 1 : 0,
+        high_risk_false_allow: writeback?.status === 'allowed' ? 1 : 0,
         proof_receipt_accuracy: scoreBoolean(actionContext.proof.expected_receipts.includes('external_writeback_request')),
       },
     })];

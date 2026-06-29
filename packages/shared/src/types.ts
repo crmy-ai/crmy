@@ -1330,6 +1330,7 @@ export interface ActionContextActionPacket {
 }
 
 export interface ActionContext {
+  contract_version: typeof ACTION_CONTEXT_PACKET_VERSION;
   subject_type: SubjectType;
   subject_id: UUID;
   generated_at: string;
@@ -1388,6 +1389,11 @@ export interface ActionContext {
     policy?: ActionContextPolicySummary;
   };
   allowed_actions: ActionContextAllowedAction[];
+  policy?: ActionContextPolicySummary;
+  source_posture: ActionContextSourcePosture;
+  human_unblock?: ActionContextActionPacket['human_unblock'];
+  next_tools: string[];
+  context_packing: ContextPackingMetadata;
   required_handoffs: Array<{
     type: 'assignment' | 'signal_review' | 'policy_approval' | 'source_conflict';
     id?: UUID | string;

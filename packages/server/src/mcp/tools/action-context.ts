@@ -40,6 +40,7 @@ async function assertActiveActor(db: DbPool, tenantId: UUID, actorId: UUID, fiel
 
 function actionContextMetadata(actionContext: ActionContext) {
   return {
+    contract_version: actionContext.contract_version,
     subject_type: actionContext.subject_type,
     subject_id: actionContext.subject_id,
     operating_mode: actionContext.operating_mode,
