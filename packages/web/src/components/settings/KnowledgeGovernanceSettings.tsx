@@ -273,41 +273,49 @@ function ClaimCard({ claim, onOpen }: { claim: KnowledgeClaimRecord; onOpen: (cl
   const { expired, gate } = claimReviewState(claim);
 
   return (
-    <div
-      className="rounded-lg border border-border bg-card p-4 cursor-pointer transition-colors hover:border-primary/30 hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-ring"
+    <article
+      className="group flex min-h-[14rem] cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-colors hover:border-primary/30 hover:bg-card/95 focus:outline-none focus:ring-2 focus:ring-ring"
       role="button"
       tabIndex={0}
       onClick={() => onOpen(claim)}
       onKeyDown={(event) => handleOpenKey(event, () => onOpen(claim))}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex flex-1 items-start gap-3 p-4">
+        <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-500">
+          <BookOpen className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <Badge tone={gate.tone}>{gate.label}</Badge>
+            <Badge tone={APPROVAL_TONE[claim.approval_status] ?? APPROVAL_TONE.unapproved}>{APPROVAL_LABEL[claim.approval_status] ?? claim.approval_status}</Badge>
+            <Badge tone={STATUS_TONE[claim.status] ?? STATUS_TONE.deprecated}>{STATUS_LABEL[claim.status] ?? claim.status}</Badge>
             <Badge tone="border-info/30 bg-info/10 text-info">{typeLabel(claim.knowledge_type)}</Badge>
-            <Badge tone="border-border bg-muted text-muted-foreground">{claim.category}</Badge>
-            <span className="font-semibold text-sm text-foreground truncate">{claim.title}</span>
           </div>
-          {claim.summary && <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{claim.summary}</p>}
+          <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">{claim.title}</h3>
+          <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{claim.summary || claim.body}</p>
+          {typeof claim.confidence === 'number' && (
+            <ClaimScoreBar label="Confidence" value={claim.confidence} />
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="rounded-full border border-border/70 bg-background/50 px-2.5 py-1 font-medium">{claim.category}</span>
+            <span className="rounded-full border border-border/70 bg-background/50 px-2.5 py-1 font-medium">{claim.source_priority}</span>
+            <span className={`rounded-full border px-2.5 py-1 font-medium ${claim.grounded ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-warning/30 bg-warning/10 text-warning'}`}>
+              {claim.grounded ? 'Grounded' : 'Ungrounded'}
+            </span>
+            <span className="line-clamp-1 min-w-0 max-w-full">{claimSourceLabel(claim)}</span>
+            {claim.valid_until && (
+              <span className={expired ? 'text-destructive' : 'text-muted-foreground'}>
+                {expired ? `Expired ${formatDate(claim.valid_until)}` : `Valid until ${formatDate(claim.valid_until)}`}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-        <Badge tone={STATUS_TONE[claim.status] ?? STATUS_TONE.deprecated}>{STATUS_LABEL[claim.status] ?? claim.status}</Badge>
-        <Badge tone={APPROVAL_TONE[claim.approval_status] ?? APPROVAL_TONE.unapproved}>{APPROVAL_LABEL[claim.approval_status] ?? claim.approval_status}</Badge>
-        <Badge tone={gate.tone}>{gate.label}</Badge>
-        <Badge tone="border-border bg-muted text-muted-foreground">{claim.source_priority}</Badge>
-        {!claim.grounded && <Badge tone="border-warning/30 bg-warning/10 text-warning">ungrounded</Badge>}
-        {claim.valid_until && (
-          <Badge tone={expired ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-border bg-muted text-muted-foreground'}>
-            {expired ? `expired ${formatDate(claim.valid_until)}` : `valid until ${formatDate(claim.valid_until)}`}
-          </Badge>
-        )}
-      </div>
-
-      <div className="mt-3 flex items-center gap-2 flex-wrap">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
         <KnowledgeClaimActions claim={claim} onOpen={() => onOpen(claim)} />
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -327,57 +335,68 @@ function KnowledgeClaimsTable({
   onOpen: (claim: KnowledgeClaimRecord) => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card">
+    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-border text-sm">
-          <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2">Fact</th>
-              <th className="px-3 py-2">Source</th>
-              <th className="px-3 py-2">Trust state</th>
-              <th className="px-3 py-2">Type/category</th>
-              <th className="px-3 py-2">Freshness</th>
-              <th className="px-3 py-2">Updated</th>
-              <th className="px-3 py-2 text-right">Actions</th>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-surface-sunken/50">
+              <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Fact</th>
+              <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Source</th>
+              <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Trust state</th>
+              <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Type</th>
+              <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Freshness</th>
+              <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Updated</th>
+              <th className="px-4 py-3 text-right text-xs font-display font-semibold text-muted-foreground"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
-            {claims.map(claim => {
+          <tbody>
+            {claims.map((claim, index) => {
               const { expired, gate } = claimReviewState(claim);
               return (
                 <tr
                   key={claim.id}
-                  className="cursor-pointer align-top transition-colors hover:bg-muted/40 focus-within:bg-muted/40"
+                  className={`cursor-pointer border-b border-border align-top transition-colors hover:bg-primary/5 focus-within:bg-primary/5 last:border-0 ${index % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}
                   role="button"
                   tabIndex={0}
                   onClick={() => onOpen(claim)}
                   onKeyDown={(event) => handleOpenKey(event, () => onOpen(claim))}
                 >
-                  <td className="max-w-sm px-3 py-3">
-                    <p className="font-semibold text-foreground">{claim.title}</p>
-                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{claim.summary || claim.body}</p>
+                  <td className="max-w-[28rem] px-4 py-3">
+                    <div className="line-clamp-1 font-semibold text-foreground">{claim.title}</div>
+                    <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">{claim.summary || claim.body}</div>
+                    {!claim.grounded && (
+                      <div className="mt-1 line-clamp-1 text-xs text-amber-600 dark:text-amber-400">Why: source grounding needed before customer use</div>
+                    )}
                   </td>
-                  <td className="max-w-[14rem] px-3 py-3">
-                    <p className="truncate text-xs font-medium text-foreground">{claimSourceLabel(claim)}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{claim.source_priority}</p>
+                  <td className="max-w-[14rem] px-4 py-3 text-muted-foreground">
+                    <div className="line-clamp-1">{claimSourceLabel(claim)}</div>
+                    <div className="mt-1 text-xs">{claim.source_priority}</div>
                   </td>
-                  <td className="px-3 py-3">
-                    <div className="flex max-w-[12rem] flex-wrap gap-1.5">
+                  <td className="px-4 py-3">
+                    <div className="flex max-w-[13rem] flex-wrap gap-1.5">
                       <Badge tone={gate.tone}>{gate.label}</Badge>
                       <Badge tone={APPROVAL_TONE[claim.approval_status] ?? APPROVAL_TONE.unapproved}>{APPROVAL_LABEL[claim.approval_status] ?? claim.approval_status}</Badge>
-                      {!claim.grounded && <Badge tone="border-warning/30 bg-warning/10 text-warning">ungrounded</Badge>}
                     </div>
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-4 py-3">
                     <div className="flex max-w-[12rem] flex-wrap gap-1.5">
                       <Badge tone="border-info/30 bg-info/10 text-info">{typeLabel(claim.knowledge_type)}</Badge>
                       <Badge tone="border-border bg-muted text-muted-foreground">{claim.category}</Badge>
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">{freshnessLabel(claim, expired)}</td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">{formatDate(claim.updated_at)}</td>
-                  <td className="px-3 py-3">
-                    <KnowledgeClaimActions claim={claim} compact onOpen={() => onOpen(claim)} />
+                  <td className="px-4 py-3 text-xs text-muted-foreground">{freshnessLabel(claim, expired)}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(claim.updated_at)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      className="inline-flex h-7 items-center rounded-lg px-2 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpen(claim);
+                      }}
+                    >
+                      Details
+                    </button>
                   </td>
                 </tr>
               );
@@ -708,7 +727,7 @@ export default function KnowledgeGovernanceSettings({ viewMode = 'cards' }: { vi
           {viewMode === 'table' ? (
             <KnowledgeClaimsTable claims={claims} onOpen={setSelectedClaim} />
           ) : (
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               {claims.map(c => <ClaimCard key={c.id} claim={c} onOpen={setSelectedClaim} />)}
             </div>
           )}
