@@ -4,13 +4,13 @@
 
 <h1 align="center">CRMy</h1>
 
-<h2 align="center">Governed customer context and action guidance for AI agents</h2>
+<h2 align="center">Open-source governed context for customer-facing agents</h2>
 
 <p align="center">
-  <strong>Messy customer context in. Agent-ready Signals, Memory, and action guidance out.</strong>
+  <strong>Source-grounded Signals, confirmed Memory, Action Context, and audit receipts.</strong>
 </p>
 <p align="center">
-  Customer-facing AI agents need more than raw CRM data in a prompt. They need to know what the customer actually said, what is stale or inferred, which actions are safe, and when a human needs to approve. CRMy turns transcripts, notes, emails, and CRM changes into source-grounded Signals and confirmed Memory, gives agents action guidance with policy and freshness checks, and records proof for every decision. Your agents act on evidence-backed context, not unsupported model guesses, and your team can audit every move.
+  CRMy is developer infrastructure for agents that need to work with customer context safely. It ingests transcripts, notes, emails, and CRM changes, extracts source-grounded Signals, promotes confirmed Memory when policy allows, and serves Action Context over MCP, REST, CLI, and the web UI. Agents can distinguish evidence from inference, see stale or risky claims, route approvals to humans, and leave an auditable trail for every action.
 </p>
 
 <p align="center">
@@ -81,10 +81,10 @@ Without a governed context layer, agents can't answer the most critical question
 - Does this customer email, CRM update, or record change need human approval?
 - What proof should exist after the agent acts?
 
-CRMy answers these questions for your agents. Instead of dumping raw records into a prompt, it gives the agent evidence-backed customer context, the warnings and policy it needs, and clear boundaries on what it may do. Then it records what happened. In short, CRMy turns raw customer input into safe, provable agent action:
+CRMy answers these questions for your agents. Instead of dumping raw records into a prompt, it gives the agent governed customer context, the warnings and policy it needs, and clear boundaries on what it may do. Then it records what happened. In short, CRMy turns messy customer data into safe, provable agent action:
 
 ```text
-Messy customer context  ->  source-grounded Signals  ->  governed Memory  ->  safe agent actions  ->  proof at every step
+Messy customer data  ->  Governed context  ->  Safe agent actions  ->  Proof at every step
 ```
 
 Want proof? Try the <a href="#local-demo">local demo</a> below to see an agent resolve a customer, get a governed briefing, check what is safe to act on, and prove lineage.
@@ -392,7 +392,7 @@ POST https://<your-crmy-host>/mcp?toolset=customer_outreach
 X-CRMy-Toolset: customer_outreach
 ```
 
-Selection only ever *narrows* what the actor's scopes already allow. It can never widen access, and per-call scope enforcement is unchanged. Autonomous agents default to a lean `standard` set; human and admin sessions default to `full`. Set `CRMY_MCP_DEFAULT_TOOLSET=full` to restore the full catalog everywhere. Call `tool_guide` to see available toolsets and the one that matches your workflow.
+Selection only ever *narrows* what the actor's scopes already allow. It can never widen access, and per-call scope enforcement is unchanged. Every session defaults to the lean Core Profile `standard` set. Pass `--toolset full`, `?toolset=full`, or set `CRMY_MCP_DEFAULT_TOOLSET=full` when an operator explicitly needs the full catalog. Call `tool_guide` to see available toolsets and the one that matches your workflow.
 
 See [MCP tools](docs/mcp-tools.md) for the full tool catalog and scoped-access model.
 

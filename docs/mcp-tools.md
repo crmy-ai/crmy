@@ -10,7 +10,7 @@ Scopes decide what an actor **may** use; a **toolset** decides what a single ses
 
 - Selection is **per connection, not per key**: `?toolset=<name>` or the `X-CRMy-Toolset` header on HTTP MCP, `crmy mcp --toolset <name>` or `CRMY_MCP_TOOLSET` on stdio. The same key can open differently-focused sessions for different jobs.
 - Selection only ever **narrows** the actor's scope-filtered tools. It can never grant access, and `enforceToolScopes` still runs on every call.
-- Defaults: autonomous **agents → `standard`** (a lean customer-reasoning loop), **humans/admins → `full`**. Operators can override the default with `CRMY_MCP_DEFAULT_TOOLSET`.
+- Defaults: every session starts with **`standard`** (the lean Core Profile customer-reasoning loop). Operators can explicitly request `full` with `?toolset=full`, `X-CRMy-Toolset: full`, `crmy mcp --toolset full`, or `CRMY_MCP_DEFAULT_TOOLSET=full`.
 - Every named toolset also includes the core navigation tools (`tool_guide`, `guide_search`, `actor_whoami`, `customer_record_resolve`, `briefing_get`, `action_context_get`, `context_find`) so a session can always orient and discover other toolsets.
 
 Available toolsets: `full`, `standard`, `record_lookup`, `ingest`, `signal_review`, `memory_promotion`, `customer_outreach`, `record_update`, `systems_writeback`, `ops`, `knowledge`, `experimental_workflows`, and `experimental_sequences`. The workflow and sequence toolsets are opt-in experimental surfaces, not part of the default Core Profile. Call `tool_guide` to see descriptions and the toolset that matches a workflow.

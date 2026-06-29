@@ -120,7 +120,7 @@ export function Sidebar() {
   const admin = isAdminRole(user?.role);
   const visibleAgentNavItems = admin
     ? agentNavItems
-    : agentNavItems.filter(item => item.path !== '/knowledge' && item.path !== '/automations');
+    : agentNavItems.filter(item => item.path !== '/knowledge');
   const visibleBottomItems = admin
     ? bottomItems
     : bottomItems.filter(item => item.path === '/settings');

@@ -4885,6 +4885,9 @@ test('Workspace Agent tool manifest keeps customer record writes visible', () =>
   for (const unexpected of [
     'workflow_create',
     'workflow_list',
+    'sequence_list',
+    'sequence_enroll',
+    'sequence_draft_step',
     'custom_field_create',
     'message_send',
     'ops_status_get',

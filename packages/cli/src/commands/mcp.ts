@@ -22,7 +22,7 @@ export function mcpCommand(): Command {
     .option(
       '--toolset <name>',
       'Working set of tools to register for this session, e.g. standard, customer_outreach, systems_writeback, ops, or full. '
-        + 'Agents default to "standard"; pass "full" for the entire catalog. Overrides CRMY_MCP_TOOLSET. Run tool_guide to see options.',
+        + 'Sessions default to the Core Profile "standard"; pass "full" for the entire catalog. Overrides CRMY_MCP_TOOLSET. Run tool_guide to see options.',
     )
     .addHelpText('after', `
 

@@ -209,8 +209,8 @@ export function createMcpServer(
   //      only remove tools, never add them, so it is purely a context optimization;
   //      call-time enforceToolScopes still guards every handler.
   // The toolset is chosen per connection (not baked into the API key), so one
-  // key can open differently-focused sessions for different jobs. Autonomous
-  // agents default to the lean "standard" set; humans/admins keep "full".
+  // key can open differently-focused sessions for different jobs. All sessions
+  // default to the lean Core Profile "standard" set; "full" is explicit opt-in.
   const allowedTools = getToolsForActor(db, actor);
   const toolsetName = resolveToolsetName(
     options?.toolset,

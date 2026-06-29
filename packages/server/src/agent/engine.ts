@@ -174,20 +174,6 @@ const WORKSPACE_AGENT_TOOL_ALLOWLIST = new Set([
   'calendar_event_process',
   'calendar_event_add_context',
 
-  // Sequences are customer work, but workflow/admin configuration is not part
-  // of the in-app Workspace Agent's default manifest.
-  'sequence_get',
-  'sequence_list',
-  'sequence_enrollment_get',
-  'sequence_enrollment_context',
-  'sequence_enrollment_list',
-  'sequence_enroll',
-  'sequence_unenroll',
-  'sequence_pause',
-  'sequence_resume',
-  'sequence_advance',
-  'sequence_draft_step',
-  'sequence_analytics',
 ]);
 
 const INTERNAL_LABELS: Record<string, string> = {
@@ -1268,9 +1254,6 @@ function buildSystemPrompt(
   const hitl = pick('action_context_request_human_unblock', 'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending');
   if (hitl) toolLines.push(`**Assignments & HITL:** ${hitl}`);
 
-  const seqWf = pick('email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list');
-  if (seqWf) toolLines.push(`**Sequences & Workflows:** ${seqWf}`);
-
   const pipeline = pick('pipeline_summary', 'pipeline_forecast', 'tenant_get_stats', 'crm_search');
   if (pipeline) toolLines.push(`**Pipeline & reporting:** ${pipeline}`);
 
@@ -1284,7 +1267,6 @@ function buildSystemPrompt(
     'activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete', 'availability_suggest_times',
     'context_add', 'context_get', 'context_find', 'context_lineage_get', 'context_list', 'context_source_list', 'context_source_get', 'context_source_reprocess', 'context_signal_group_list', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
     'action_context_request_human_unblock', 'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending',
-    'email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list',
     'pipeline_summary', 'pipeline_forecast', 'tenant_get_stats', 'crm_search',
   ]);
   const others = toolDefs.filter(t => !grouped.has(t.name)).map(t => t.name).join(' · ');

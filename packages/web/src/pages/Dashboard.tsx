@@ -49,7 +49,6 @@ import {
   ArrowUpRight,
   X,
   RotateCcw,
-  Zap,
   Server,
   Building2,
   Briefcase,
@@ -1399,15 +1398,6 @@ function AdminDashboard() {
       status: pendingHITL.length > 0 ? 'watch' as const : 'ready' as const,
       href: '/handoffs',
     },
-    {
-      id: 'pgvector',
-      complete: semanticRetrievalReady,
-      icon: Brain,
-      title: semanticRetrievalReady ? 'Semantic context ready' : 'Semantic retrieval setup',
-      detail: semanticRetrievalReady ? 'Vector search can retrieve related customer context.' : 'Keyword search works; pgvector plus embeddings improves retrieval.',
-      status: semanticRetrievalReady ? 'ready' as const : 'watch' as const,
-      href: '/settings/database',
-    },
   ];
   const activationTotal = activationSteps.length;
   const activationComplete = activationSteps.filter(step => step.complete || skippedActivationSteps[step.id]).length;
@@ -1467,13 +1457,6 @@ function AdminDashboard() {
       detail: 'Approve, reject, or route agent decisions.',
       href: '/handoffs',
       tone: 'action' as const,
-    }] : []),
-    ...(!semanticRetrievalReady ? [{
-      icon: Brain,
-      title: 'Semantic retrieval is not ready',
-      detail: 'Keyword search works; enable pgvector and embeddings for stronger recall.',
-      href: '/settings/database',
-      tone: 'watch' as const,
     }] : []),
     ...(!agentEnabled ? [{
       icon: Bot,
@@ -1691,10 +1674,6 @@ function AdminDashboard() {
                 <Link to="/context?tab=signals" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                   <GitCompareArrows className="h-4 w-4" />
                   Review Signals
-                </Link>
-                <Link to="/automations" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                  <Zap className="h-3.5 w-3.5" />
-                  Experiments
                 </Link>
               </div>
             </div>
