@@ -65,6 +65,32 @@ export function ClaimScoreBar({
   );
 }
 
+export function CompactScoreBar({
+  label,
+  value,
+  trailing,
+}: {
+  label: string;
+  value: number;
+  trailing?: ReactNode;
+}) {
+  const pct = Math.round(clamp01(value) * 100);
+  return (
+    <div className="mt-3 space-y-1.5">
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="font-medium text-muted-foreground">{label}</span>
+        <span className="font-semibold tabular-nums text-muted-foreground">{trailing ?? `${pct}%`}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-foreground/30 transition-all duration-500 dark:bg-foreground/35"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function ContextClaimPanel({
   label,
   title,

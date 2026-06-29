@@ -23,8 +23,16 @@ import {
 } from '@/components/ui/sheet';
 import {
   ClaimScoreBar,
+  CompactScoreBar,
   ContextClaimPanel,
 } from '@/components/crm/ContextClaimPanel';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   useKnowledgeClaims, useReviewKnowledgeClaim, useDetectKnowledgeConflicts,
   type KnowledgeClaimListFilters,
@@ -32,7 +40,7 @@ import {
 import type { KnowledgeClaimRecord, KnowledgeReviewDecision } from '@crmy/shared';
 import {
   BookOpen, CheckCircle2, XCircle, Archive, Clock, RotateCcw, ShieldCheck,
-  AlertTriangle, Search, GitCompareArrows, Loader2, Filter, Eye, ExternalLink,
+  AlertTriangle, Search, GitCompareArrows, Loader2, Filter, Eye, ExternalLink, MoreHorizontal,
 } from 'lucide-react';
 
 const btnPrimary = 'inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40';
@@ -269,6 +277,129 @@ function KnowledgeClaimActions({
   );
 }
 
+function KnowledgeClaimCardActions({
+  claim,
+  onOpen,
+  onReviewed,
+}: {
+  claim: KnowledgeClaimRecord;
+  onOpen: () => void;
+  onReviewed?: (claim: KnowledgeClaimRecord) => void;
+}) {
+  const review = useReviewKnowledgeClaim();
+  const {
+    expired,
+    isRetired,
+    canApproveForCustomer,
+    canApproveInternal,
+    customerActionLabel,
+  } = claimReviewState(claim);
+
+  const apply = (decision: KnowledgeReviewDecision, approved_for_external_use?: boolean) => {
+    review.mutate(
+      { id: claim.id, decision, approved_for_external_use },
+      {
+        onSuccess: (updated) => {
+          onReviewed?.(updated);
+          toast({ title: 'Trusted Fact updated', description: `"${claim.title}" -> ${updated.status} / ${updated.approval_status}` });
+        },
+        onError: (err: unknown) => toast({ title: 'Review failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' }),
+      },
+    );
+  };
+
+  const primaryAction = canApproveForCustomer
+    ? {
+      label: customerActionLabel,
+      Icon: ShieldCheck,
+      className: btnApprove,
+      onClick: () => apply('approve', true),
+    }
+    : canApproveInternal
+    ? {
+      label: 'Approve internal',
+      Icon: CheckCircle2,
+      className: btnApproveOutline,
+      onClick: () => apply('approve', false),
+    }
+    : ((claim.status === 'stale' && !expired) || isRetired)
+    ? {
+      label: 'Restore',
+      Icon: RotateCcw,
+      className: btnOutline,
+      onClick: () => apply('reactivate'),
+    }
+    : null;
+
+  const showApproveInternalInMenu = canApproveInternal && primaryAction?.label !== 'Approve internal';
+  const showRestoreInMenu = ((claim.status === 'stale' && !expired) || isRetired) && primaryAction?.label !== 'Restore';
+
+  return (
+    <div className="flex w-full items-center justify-between gap-2" onClick={(event) => event.stopPropagation()}>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {review.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+        {primaryAction && (
+          <button className={primaryAction.className} type="button" disabled={review.isPending} onClick={primaryAction.onClick}>
+            <primaryAction.Icon className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />{primaryAction.label}
+          </button>
+        )}
+      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            aria-label="Knowledge fact actions"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem onClick={onOpen}>
+            <Eye className="mr-2 h-3.5 w-3.5" />
+            Details
+          </DropdownMenuItem>
+          {showApproveInternalInMenu && (
+            <DropdownMenuItem onClick={() => apply('approve', false)} disabled={review.isPending}>
+              <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+              Approve internal
+            </DropdownMenuItem>
+          )}
+          {claim.status === 'active' && (
+            <DropdownMenuItem onClick={() => apply('mark_stale')} disabled={review.isPending}>
+              <Clock className="mr-2 h-3.5 w-3.5" />
+              Mark needs review
+            </DropdownMenuItem>
+          )}
+          {showRestoreInMenu && (
+            <DropdownMenuItem onClick={() => apply('reactivate')} disabled={review.isPending}>
+              <RotateCcw className="mr-2 h-3.5 w-3.5" />
+              Restore
+            </DropdownMenuItem>
+          )}
+          {claim.status !== 'deprecated' && (
+            <DropdownMenuItem onClick={() => apply('deprecate')} disabled={review.isPending}>
+              <Archive className="mr-2 h-3.5 w-3.5" />
+              Retire
+            </DropdownMenuItem>
+          )}
+          {claim.status !== 'rejected' && (
+            <DropdownMenuItem
+              onClick={() => apply('reject')}
+              disabled={review.isPending}
+              className="text-rose-600 focus:text-rose-600 dark:text-rose-400"
+            >
+              <XCircle className="mr-2 h-3.5 w-3.5" />
+              Reject
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 function ClaimCard({ claim, onOpen }: { claim: KnowledgeClaimRecord; onOpen: (claim: KnowledgeClaimRecord) => void }) {
   const { expired, gate } = claimReviewState(claim);
 
@@ -294,7 +425,7 @@ function ClaimCard({ claim, onOpen }: { claim: KnowledgeClaimRecord; onOpen: (cl
           <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">{claim.title}</h3>
           <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{claim.summary || claim.body}</p>
           {typeof claim.confidence === 'number' && (
-            <ClaimScoreBar label="Confidence" value={claim.confidence} />
+            <CompactScoreBar label="Confidence" value={claim.confidence} />
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span className="rounded-full border border-border/70 bg-background/50 px-2.5 py-1 font-medium">{claim.category}</span>
@@ -313,7 +444,7 @@ function ClaimCard({ claim, onOpen }: { claim: KnowledgeClaimRecord; onOpen: (cl
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
-        <KnowledgeClaimActions claim={claim} onOpen={() => onOpen(claim)} />
+        <KnowledgeClaimCardActions claim={claim} onOpen={() => onOpen(claim)} />
       </div>
     </article>
   );

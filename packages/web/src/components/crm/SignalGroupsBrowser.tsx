@@ -52,7 +52,7 @@ import {
 } from '@/components/ui/sheet';
 import { toast } from '@/hooks/use-toast';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
-import { ClaimScoreBar, ContextClaimPanel, DetailDisclosure } from '@/components/crm/ContextClaimPanel';
+import { ClaimScoreBar, CompactScoreBar, ContextClaimPanel, DetailDisclosure } from '@/components/crm/ContextClaimPanel';
 import { useAppStore } from '@/store/appStore';
 
 function pct(value: number | null | undefined) {
@@ -1501,11 +1501,9 @@ export function SignalGroupsBrowser({
                           <p className="line-clamp-2 text-sm text-muted-foreground"><span className="font-semibold">What's needed:</span> {blockerSummary}</p>
                         </div>
                       )}
+                      <CompactScoreBar label="Signal readiness" value={readiness.score} />
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <SignalSubjectChip group={group} />
-                        <span className="rounded-full bg-muted px-2 py-0.5 font-semibold text-muted-foreground">
-                          {pct(readiness.score)} signal readiness
-                        </span>
                         <span>{readiness.components.evidence_count} evidence</span>
                         <span>{readiness.components.independent_source_count} source{readiness.components.independent_source_count === 1 ? '' : 's'}</span>
                         {readiness.components.conflict_count > 0 && (
