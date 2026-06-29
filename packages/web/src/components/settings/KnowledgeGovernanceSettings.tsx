@@ -336,14 +336,6 @@ function KnowledgeClaimCardActions({
 
   return (
     <div className="flex w-full items-center justify-between gap-2" onClick={(event) => event.stopPropagation()}>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        {review.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-        {primaryAction && (
-          <button className={primaryAction.className} type="button" disabled={review.isPending} onClick={primaryAction.onClick}>
-            <primaryAction.Icon className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />{primaryAction.label}
-          </button>
-        )}
-      </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -396,6 +388,14 @@ function KnowledgeClaimCardActions({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+        {review.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+        {primaryAction && (
+          <button className={primaryAction.className} type="button" disabled={review.isPending} onClick={primaryAction.onClick}>
+            <primaryAction.Icon className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />{primaryAction.label}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

@@ -1516,7 +1516,36 @@ export function SignalGroupsBrowser({
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex justify-start">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                            aria-label="Signal actions"
+                          >
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-44">
+                          <DropdownMenuItem onClick={() => openSignal(group.id)}>
+                            <Eye className="mr-2 h-3.5 w-3.5" />
+                            Details
+                          </DropdownMenuItem>
+                          {canAct && (
+                            <DropdownMenuItem
+                              onClick={() => onDismiss(group.id)}
+                              className="text-rose-600 focus:text-rose-600 dark:text-rose-400"
+                            >
+                              <X className="mr-2 h-3.5 w-3.5" />
+                              Reject as Memory
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <div className="ml-auto flex flex-wrap justify-end gap-2">
                       {canAct && readiness.status === 'approval_required' && (
                         <button type="button" className={signalActionClass('warning')} onClick={() => openSignal(group.id)}>
                           <ShieldCheck className="mr-1 h-3.5 w-3.5" />
@@ -1548,35 +1577,6 @@ export function SignalGroupsBrowser({
                           {primaryActionLabel(readiness)}
                         </button>
                       )}
-                    </div>
-                    <div className="ml-auto flex justify-end">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                            aria-label="Signal actions"
-                          >
-                            <MoreHorizontal className="h-3.5 w-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44">
-                          <DropdownMenuItem onClick={() => openSignal(group.id)}>
-                            <Eye className="mr-2 h-3.5 w-3.5" />
-                            Details
-                          </DropdownMenuItem>
-                          {canAct && (
-                            <DropdownMenuItem
-                              onClick={() => onDismiss(group.id)}
-                              className="text-rose-600 focus:text-rose-600 dark:text-rose-400"
-                            >
-                              <X className="mr-2 h-3.5 w-3.5" />
-                              Reject as Memory
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
                     </div>
                   </div>
                 </article>
