@@ -21,12 +21,12 @@ async function contractRun() {
   return runCrmyEval({ profile: 'contract' });
 }
 
-test('runCrmyEval skips planned suites instead of throwing (#1)', async () => {
+test('runCrmyEval runs connector certification as an implemented seeded-context suite', async () => {
   const run = await runCrmyEval({ suites: ['record_resolution', 'connector_certification'] });
-  assert.notEqual(run.status, 'error');
-  const planned = run.results.find(result => result.suite === 'connector_certification');
-  assert.ok(planned, 'connector_certification should appear in results');
-  assert.equal(planned.status, 'skipped');
+  assert.equal(run.status, 'pass');
+  const connectorResults = run.results.filter(result => result.suite === 'connector_certification');
+  assert.equal(connectorResults.length, 2);
+  assert.equal(connectorResults.every(result => result.status === 'pass'), true);
 });
 
 test('exporters produce non-empty, parseable output for every format (#4)', async () => {

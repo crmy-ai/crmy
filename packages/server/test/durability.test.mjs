@@ -1690,6 +1690,7 @@ test('local eval harness wraps deterministic customer-context corpora', async ()
     'retrieval_quality',
     'action_context',
     'source_attribution',
+    'high_impact_autopromote',
     'connector_certification',
     'tool_choice',
     'agent_trajectory',
@@ -1714,18 +1715,39 @@ test('local eval harness wraps deterministic customer-context corpora', async ()
 test('active context quality evals run seeded gates and live extraction without golden input', async () => {
   const seeded = await runCrmyEval({ profile: 'seeded_context' });
   assert.equal(seeded.status, 'pass');
-  assert.equal(seeded.totals.cases, 5);
+  assert.equal(seeded.totals.cases, 12);
+  assert.equal(seeded.suites.some(suite => suite.name === 'high_impact_autopromote'), true);
   assert.equal(seeded.scores.required_context_recall, 1);
   assert.equal(seeded.scores.scope_leak_count, 0);
   assert.equal(seeded.scores.contract_shape_accuracy, 1);
   assert.equal(seeded.scores.readiness_decision_accuracy, 1);
   assert.equal(seeded.scores.high_risk_false_allow, 0);
+  assert.equal(seeded.scores.high_impact_autopromote_false_allow, 0);
+  assert.equal(seeded.scores.high_impact_autopromote_decision_accuracy, 1);
   assert.equal(seeded.scores.unsafe_customer_claim_allowed, 0);
   assert.equal(seeded.scores.connector_contract_parity, 1);
   assert.equal(seeded.scores.writeback_preview_policy_accuracy, 1);
   assert.equal(seeded.scores.lineage_parity_receipt_coverage, 1);
   assert.equal(seeded.scores.sor_conflict_deferral, 1);
   assert.equal(seeded.scores.readonly_writeback_false_allow, 0);
+  const highImpactResults = seeded.results.filter(result => result.suite === 'high_impact_autopromote');
+  assert.equal(highImpactResults.length, 7);
+  assert.equal(highImpactResults.every(result => result.status === 'pass'), true);
+  assert.equal(highImpactResults.find(result => result.id === 'tier2_independent_recent_grounded_allowed')?.observed?.auto_promote_allowed, true);
+  assert.equal(highImpactResults
+    .filter(result => result.id !== 'tier2_independent_recent_grounded_allowed')
+    .every(result => result.observed?.auto_promote_allowed === false), true);
+
+  const unsafeHighImpact = await runCrmyEval({
+    suites: ['high_impact_autopromote'],
+    profile: 'seeded_context',
+    highImpactAutopromoteEvaluator: () => true,
+  });
+  assert.equal(unsafeHighImpact.status, 'fail');
+  assert.ok(unsafeHighImpact.scores.high_impact_autopromote_false_allow > 0);
+  assert.ok(unsafeHighImpact.results.some(result =>
+    result.diagnostics.forbidden_items_found.includes('high-impact Tier-2 auto-promotion allowed'),
+  ));
 
   const skippedLive = await runCrmyEval({ profile: 'live_model' });
   assert.equal(skippedLive.status, 'skipped');

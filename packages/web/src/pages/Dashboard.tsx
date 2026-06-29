@@ -6,6 +6,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { ContextGovernance } from '@/components/crm/ContextGovernance';
 import { SeedSampleDataButton } from '@/components/crm/OnboardingEmptyState';
+import { StatusChip, type StatusChipTone } from '@/components/crm/StatusChip';
 import { EntityCombobox, type EntityType } from '@/components/ui/entity-combobox';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import {
@@ -19,6 +20,7 @@ import {
   useDbConfig,
   useEmailMessages,
   useHITLRequests,
+  useKnowledgeClaims,
   useOpportunities,
   usePipelineSummary,
   useSignalGroups,
@@ -44,6 +46,7 @@ import {
   CheckCircle2,
   Layers,
   Brain,
+  BookOpen,
   Database,
   Sparkles,
   ArrowUpRight,
@@ -365,36 +368,6 @@ function CoverageItem({
       </div>
       <ArrowRight className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/40 transition-colors group-hover:text-primary" />
     </Link>
-  );
-}
-
-function CommandStatusChip({
-  icon: Icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string;
-  tone: 'ready' | 'action' | 'watch';
-}) {
-  const color = tone === 'ready'
-    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-    : tone === 'watch'
-      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-      : 'bg-primary/10 text-primary';
-
-  return (
-    <div className="inline-flex min-w-0 items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
-      <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${color}`}>
-        <Icon className="h-3.5 w-3.5" />
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
-        <span className="block truncate text-sm font-semibold text-foreground">{value}</span>
-      </span>
-    </div>
   );
 }
 
@@ -800,7 +773,7 @@ function ScopedOverviewDashboard() {
     }
   });
   const { data: hitlData } = useHITLRequests() as any;
-  const { data: memoryData } = useContextEntries({ memory_status: 'active', limit: 1 }) as any;
+  const { data: memoryData } = useContextEntries({ memory_status: 'active', limit: 200 }) as any;
   const { data: nextStepMemoryData } = useContextEntries({ memory_status: 'active', context_type: 'next_step', limit: 200 }) as any;
   const { data: staleData } = useStaleContextEntries({ limit: 50 }) as any;
   const { data: signalGroupData } = useSignalGroups({ attention_only: true, limit: 10 }) as any;
@@ -1318,6 +1291,8 @@ function AdminDashboard() {
   const { data: contactsData } = useContacts({ limit: 1 }) as any;
   const { data: opportunitiesData } = useOpportunities({ limit: 1 }) as any;
   const { data: useCasesData } = useUseCases({ limit: 1 }) as any;
+  const { data: knowledgeData } = useKnowledgeClaims({ limit: 1 }) as any;
+  const { data: knowledgeReviewData } = useKnowledgeClaims({ needs_review: true, limit: 1 }) as any;
   const { data: writebacksData } = useSystemWritebacks({ limit: 50 }) as any;
   const { data: syncRunsData } = useSystemSyncRuns({ limit: 20 }) as any;
   const { data: dbInfo } = useDbConfig() as any;
@@ -1344,12 +1319,29 @@ function AdminDashboard() {
     ...syncRuns.filter(run => ['failed', 'error'].includes(String(run.status ?? '').toLowerCase())),
   ].length;
   const staleCount: number = (staleData?.stale_entries ?? staleData?.data ?? []).length;
+  const activeMemoryEntries: any[] = memoryData?.data ?? [];
+  const weakMemoryCount = activeMemoryEntries.filter(entry => {
+    const confidence = Number(entry.confidence ?? entry.confidence_score ?? 0);
+    return confidence > 0 && confidence < 0.7;
+  }).length;
+  const memoryHealthValue =
+    memoryTotal === 0
+      ? 'No Memory'
+      : staleCount > 0
+        ? `${staleCount.toLocaleString()} review`
+        : weakMemoryCount > 0
+          ? `${weakMemoryCount.toLocaleString()} weak`
+          : 'Healthy';
+  const memoryHealthTone: StatusChipTone =
+    memoryTotal === 0 ? 'action' : staleCount > 0 || weakMemoryCount > 0 ? 'watch' : 'ready';
   const actors: any[] = actorsData?.data ?? [];
   const agents = actors.filter((a: any) => a.actor_type === 'agent');
   const activeAgents = agents.filter((a: any) => a.is_active);
   const dbConnected = Boolean(dbInfo?.database || dbInfo?.host);
   const sampleSeeded = Boolean(dbInfo?.sample_data?.seeded);
-  const semanticRetrievalReady = Boolean(dbInfo?.ready ?? dbInfo?.pgvector_enabled);
+  const knowledgeTotal = Number(knowledgeData?.count ?? knowledgeData?.claims?.length ?? 0);
+  const knowledgeReviewTotal = Number(knowledgeReviewData?.count ?? knowledgeReviewData?.claims?.length ?? 0);
+  const knowledgeReady = knowledgeTotal > 0 && knowledgeReviewTotal === 0;
   const handoffReady = pendingHITL.length === 0;
   const activeTab = searchParams.get('tab') === 'health' ? 'health' : 'overview';
   const activationSteps = [
@@ -1504,7 +1496,7 @@ function AdminDashboard() {
       value: pendingHITL.length > 0 ? `${pendingHITL.length} review` : 'Ready',
       detail: pendingHITL.length > 0
         ? 'Resolve pending approvals in Handoffs before agents complete governed actions.'
-        : 'One retrieval call returns Memory, Signals, stale warnings, evidence, and action boundaries.',
+        : 'One context call returns Memory, Signals, stale warnings, evidence, and action boundaries.',
       href: pendingHITL.length > 0 ? '/handoffs' : '/agent',
       color: pendingHITL.length > 0 ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-[#6366f1]/15 text-[#6366f1]',
     },
@@ -1568,23 +1560,23 @@ function AdminDashboard() {
               <div className="max-w-2xl">
                 <h2 className="font-display font-bold text-foreground">Workspace Status</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Setup, context activity, and pending review status.
+                  Memory health, context activity, and pending review status.
                 </p>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:min-w-[36rem]">
-                <CommandStatusChip
-                  icon={CheckCircle2}
-                  label="Setup"
-                  value={coreSetupReady ? 'Ready' : `${activationComplete}/${activationTotal} ready`}
-                  tone={coreSetupReady ? 'ready' : 'action'}
+                <StatusChip
+                  icon={ShieldCheck}
+                  label="Memory Health"
+                  value={memoryHealthValue}
+                  tone={memoryHealthTone}
                 />
-                <CommandStatusChip
+                <StatusChip
                   icon={Layers}
                   label="Context Flow"
                   value={`${observationsTotal.toLocaleString()} → ${signalGroupTotal.toLocaleString()} → ${memoryTotal.toLocaleString()}`}
                   tone={memoryTotal > 0 ? 'ready' : observationsTotal > 0 || signalGroupTotal > 0 ? 'watch' : 'action'}
                 />
-                <CommandStatusChip
+                <StatusChip
                   icon={Inbox}
                   label="Action Boundary"
                   value={pendingHITL.length > 0 ? `${pendingHITL.length} pending` : 'Clear'}
@@ -1710,7 +1702,7 @@ function AdminDashboard() {
                 <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
                 <div className="min-w-0">
                   <p className="text-sm font-semibold">No action needed right now</p>
-                  <p className="text-xs opacity-80">Signals, Memory, handoffs, and search readiness are in good shape.</p>
+                  <p className="text-xs opacity-80">Signals, Memory, handoffs, and Knowledge are in good shape.</p>
                 </div>
               </div>
             )}
@@ -1722,7 +1714,7 @@ function AdminDashboard() {
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <h2 className="font-display font-bold text-foreground">System Snapshot</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Memory coverage, pending writebacks, agent status, and retrieval readiness.</p>
+                <p className="mt-1 text-sm text-muted-foreground">Memory coverage, pending writebacks, agent status, and Knowledge readiness.</p>
               </div>
               <button
                 type="button"
@@ -1760,12 +1752,18 @@ function AdminDashboard() {
                 ready={agentEnabled}
               />
               <ReadinessItem
-                icon={Brain}
-                title="Semantic retrieval"
-                value={semanticRetrievalReady ? 'Enabled' : 'Keyword'}
-                detail={semanticRetrievalReady ? 'Semantic search can find related context.' : 'Keyword search works; pgvector plus embeddings improves recall.'}
-                href="/settings/database"
-                ready={semanticRetrievalReady}
+                icon={BookOpen}
+                title="Knowledge"
+                value={knowledgeTotal > 0 ? `${knowledgeTotal.toLocaleString()} fact${knowledgeTotal === 1 ? '' : 's'}` : 'Set up'}
+                detail={
+                  knowledgeReviewTotal > 0
+                    ? `${knowledgeReviewTotal.toLocaleString()} fact${knowledgeReviewTotal === 1 ? '' : 's'} need review before agents use them.`
+                    : knowledgeTotal > 0
+                      ? 'Approved product and company facts are available for governed agent use.'
+                      : 'Connect or sync Knowledge Sources to give agents governed facts.'
+                }
+                href="/knowledge"
+                ready={knowledgeReady}
               />
             </div>
             {snapshotExpanded && (

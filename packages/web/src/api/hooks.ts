@@ -1693,6 +1693,15 @@ export function useAssignments(params?: {
 }) {
   return useList('assignments', 'assignments', params);
 }
+export function useAssignmentReviewQueue(params?: {
+  assigned_to?: string;
+  mine?: boolean;
+  subject_type?: string;
+  subject_id?: string;
+  limit?: number;
+}) {
+  return useList('assignment-review-queue', 'assignments/review-queue', params);
+}
 export function useAssignment(id: string) {
   return useQuery({ queryKey: ['assignment', id], queryFn: () => api.get(`assignments/${id}`), enabled: !!id });
 }
@@ -1726,6 +1735,21 @@ export function useCompleteAssignment() {
     mutationFn: ({ id, ...data }: { id: string; completed_by_activity_id?: string }) =>
       api.post(`assignments/${id}/complete`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['assignments'] }),
+  });
+}
+export function useResolveReviewAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, extend_days }: { id: string; extend_days?: number }) =>
+      api.post(`assignments/${id}/review-resolve`, { extend_days }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['assignments'] });
+      qc.invalidateQueries({ queryKey: ['assignment-review-queue'] });
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+      qc.invalidateQueries({ queryKey: ['context-stale'] });
+      qc.invalidateQueries({ queryKey: ['briefing'] });
+    },
   });
 }
 export function useDeclineAssignment() {
@@ -2500,6 +2524,14 @@ export interface AgentConfigData {
   signal_auto_promote_threshold: number;
   tier2_autopromote_policy: 'corroborated' | 'human_only';
   signal_source_quality?: Record<string, number>;
+  automatic_memory_enabled?: boolean;
+  model_certification_status?: 'uncertified' | 'certified' | 'failed';
+  model_certification_source?: 'crmy_published' | 'eval_run' | null;
+  model_certification_prompt?: string | null;
+  model_certification_profile?: string | null;
+  model_certification_run_id?: string | null;
+  model_certification_score?: number | null;
+  model_certified_at?: string | null;
   backup_enabled: boolean;
   backup_provider: ProviderId | null;
   backup_base_url: string | null;

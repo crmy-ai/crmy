@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Sparkles, Bot, KeyRound, Users, TriangleAlert, Eye, EyeOff, X,
-  ActivitySquare, ArrowRight, CheckCircle2, XCircle,
+  ActivitySquare, ArrowRight, CheckCircle2, XCircle, Copy,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -21,6 +21,7 @@ import {
   useSaveAgentConfig,
   useTestAgentConnection,
   useClearAllAgentSessions,
+  type AgentConfigData,
 } from '@/api/hooks';
 import {
   PROVIDERS,
@@ -67,6 +68,93 @@ function normalizeSourceQualitySettings(value?: Record<string, number> | null) {
     ...DEFAULT_SIGNAL_SOURCE_QUALITY,
     ...(value ?? {}),
   };
+}
+
+function certificationScoreLabel(score?: number | null) {
+  if (typeof score !== 'number' || !Number.isFinite(score)) return null;
+  return `${Math.round(score * 100)}%`;
+}
+
+function certificationSourceLabel(source?: AgentConfigData['model_certification_source']) {
+  if (source === 'crmy_published') return 'CRMy pre-certified';
+  if (source === 'eval_run') return 'Certified by eval run';
+  return 'Not certified';
+}
+
+function ModelCertificationStatus({ config }: { config?: AgentConfigData }) {
+  const automaticMemoryEnabled = Boolean(config?.automatic_memory_enabled);
+  const autoPromoteDisabled = config?.auto_promote_signals === false;
+  const status = config?.model_certification_status ?? 'uncertified';
+  const score = certificationScoreLabel(config?.model_certification_score);
+  const source = certificationSourceLabel(config?.model_certification_source);
+  const tone = automaticMemoryEnabled
+    ? 'border-success/25 bg-success/8 text-success'
+    : autoPromoteDisabled
+    ? 'border-border bg-muted/25 text-muted-foreground'
+    : status === 'failed'
+    ? 'border-destructive/25 bg-destructive/8 text-destructive'
+    : 'border-amber-500/25 bg-amber-500/8 text-amber-600 dark:text-amber-400';
+  const title = automaticMemoryEnabled
+    ? 'Automatic Memory on'
+    : autoPromoteDisabled
+    ? 'Automatic Memory disabled'
+    : status === 'failed'
+    ? 'Certification failed'
+    : 'Review-only until certified';
+  const certifyCommand = 'crmy certify --output ./eval-runs';
+  const showCertifyCommand = !automaticMemoryEnabled && !autoPromoteDisabled;
+
+  const copyCertifyCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(certifyCommand);
+      toast({ title: 'Certification command copied' });
+    } catch {
+      toast({ title: 'Copy failed', description: certifyCommand, variant: 'destructive' });
+    }
+  };
+
+  return (
+    <div className={`rounded-xl border p-3 ${tone}`}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            {automaticMemoryEnabled ? <CheckCircle2 className="h-4 w-4" /> : <TriangleAlert className="h-4 w-4" />}
+            <p className="text-sm font-semibold">{title}</p>
+            <span className="rounded-full border border-current/20 px-2 py-0.5 text-[11px] font-semibold">
+              {source}{score ? ` · ${score}` : ''}
+            </span>
+          </div>
+          {config?.model_certification_prompt && (
+            <p className="mt-2 text-xs leading-5 opacity-90">{config.model_certification_prompt}</p>
+          )}
+          {showCertifyCommand && (
+            <div className="mt-3 flex flex-col gap-2 rounded-lg border border-current/15 bg-background/60 p-2 sm:flex-row sm:items-center sm:justify-between">
+              <code className="break-all text-xs text-foreground">{certifyCommand}</code>
+              <button
+                type="button"
+                onClick={copyCertifyCommand}
+                className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md border border-current/20 px-2 text-xs font-semibold hover:bg-current/10"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="grid shrink-0 gap-1 text-xs md:min-w-44">
+          {config?.model_certification_profile && (
+            <p><span className="opacity-70">Profile</span> <span className="font-mono">{config.model_certification_profile}</span></p>
+          )}
+          {config?.model_certification_run_id && (
+            <p><span className="opacity-70">Run</span> <span className="font-mono">{config.model_certification_run_id}</span></p>
+          )}
+          {config?.model_certified_at && (
+            <p><span className="opacity-70">Certified</span> {new Date(config.model_certified_at).toLocaleDateString()}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const defaultSystemPrompt = `You are a CRMy workspace assistant with direct API access to customer records, customer context, and scoped operational tools.
@@ -1132,6 +1220,7 @@ export default function AgentSettings() {
                 aria-label="Auto-promote high-confidence Signals"
               />
             </div>
+            <ModelCertificationStatus config={config ?? undefined} />
             {autoPromoteSignals && (
               <div className="rounded-xl border border-border bg-muted/25 p-3 space-y-2">
                 <div className="flex items-center justify-between gap-3">

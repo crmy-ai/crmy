@@ -5,11 +5,12 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ListOrdered, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw, Zap, BookOpen } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, ListOrdered, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw, Zap, BookOpen } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
+import { ViewModeToggle, type ViewMode } from '@/components/crm/ViewModeToggle';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
@@ -781,7 +782,7 @@ function ApiKeysSettings() {
   const updateKey = useUpdateApiKey();
   const revokeKey = useRevokeApiKey();
 
-  const [view, setView] = useState<'table' | 'card'>('table');
+  const [view, setView] = useState<ViewMode>('table');
   const [search, setSearch] = useState('');
   const [scopeFilter, setScopeFilter] = useState('');
   const [usageFilter, setUsageFilter] = useState<'all' | 'used' | 'never'>('all');
@@ -1081,10 +1082,7 @@ function ApiKeysSettings() {
           <option value="last_used_at_desc">Recently used</option>
           <option value="last_used_at_asc">Least used</option>
         </select>
-        <div className="flex items-center border border-border rounded-xl overflow-hidden flex-shrink-0">
-          <button onClick={() => setView('table')} className={`p-2 transition-colors ${view === 'table' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}><List className="w-4 h-4" /></button>
-          <button onClick={() => setView('card')} className={`p-2 transition-colors ${view === 'card' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}><LayoutGrid className="w-4 h-4" /></button>
-        </div>
+        <ViewModeToggle value={view} onChange={setView} />
         <button onClick={() => setShowCreate(true)} disabled={showCreate}
           className="h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale disabled:opacity-50">
           <Plus className="w-4 h-4" /> New Key
@@ -2463,7 +2461,7 @@ function UsersSettings() {
   const deleteUser = useDeleteUser();
 
   const isMobile = useIsMobile();
-  const [view, setView] = useState<'table' | 'cards'>('table');
+  const [view, setView] = useState<ViewMode>('table');
   const effectiveView = isMobile ? 'cards' : view;
 
   const [search, setSearch] = useState('');
@@ -2619,20 +2617,7 @@ function UsersSettings() {
           <h2 className="font-display font-bold text-lg text-foreground">Team Members</h2>
           <p className="text-sm text-muted-foreground mt-0.5">Manage who has access to your CRMy workspace.</p>
         </div>
-        <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5 mt-0.5">
-          <button
-            onClick={() => setView('table')}
-            className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            <List className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setView('cards')}
-            className={`p-1.5 rounded-lg text-sm transition-all ${view === 'cards' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            <LayoutGrid className="w-4 h-4" />
-          </button>
-        </div>
+        <ViewModeToggle value={view} onChange={setView} className="hidden md:inline-flex mt-0.5" />
       </div>
 
       {/* Toolbar */}
@@ -5952,7 +5937,7 @@ function DatabaseSettings() {
 
 	      <div className="flex items-center gap-2 flex-wrap">
 	        {localSetupEnabled && !editing ? (
-	          <button onClick={() => { setEditing(true); setSaveSuccess(''); setTestResult('idle'); }}
+	          <button type="button" onClick={() => { setEditing(true); setSaveSuccess(''); setTestResult('idle'); }}
 	            className="h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale">
 	            <Database className="w-4 h-4" /> Edit Connection
 	          </button>
@@ -5964,9 +5949,9 @@ function DatabaseSettings() {
 	          <span className="h-9 px-3 inline-flex items-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
 	            Managed by server environment
 	          </span>
-	        )}
+        )}
         <span className={`h-9 inline-flex items-center px-3 rounded-xl border text-sm font-medium ${semanticReady ? 'border-success/30 bg-success/5 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>
-          Semantic retrieval {semanticReady ? 'ready' : 'needs setup'}
+          Semantic search {semanticReady ? 'ready' : 'needs setup'}
         </span>
       </div>
 
@@ -5997,7 +5982,7 @@ function DatabaseSettings() {
               ))}
             </div>
             <div className="pt-3 mt-3 border-t border-border text-xs text-muted-foreground">
-              Semantic retrieval helps CRMy find related Memory and Signals even when wording differs. Keyword search still works when semantic retrieval is not ready.
+              Semantic search helps CRMy find related Memory and Signals even when wording differs. Keyword search still works when semantic search is not ready.
             </div>
           </div>
         )}
@@ -6005,15 +5990,15 @@ function DatabaseSettings() {
         <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-foreground">Semantic retrieval setup</h3>
+              <h3 className="text-sm font-semibold text-foreground">Semantic search setup</h3>
               <p className="text-sm text-muted-foreground mt-0.5">
                 Enable this when you want natural-language search and stronger related-context matching.
               </p>
             </div>
             <span
               className={`inline-flex items-center justify-center rounded-full border text-xs font-semibold ${semanticReady ? 'gap-1.5 px-2.5 py-1 border-success/30 bg-success/5 text-success' : 'h-8 w-8 border-warning/30 bg-warning/10 text-warning'}`}
-              title={semanticReady ? 'Semantic retrieval ready' : 'Semantic retrieval needs setup'}
-              aria-label={semanticReady ? 'Semantic retrieval ready' : 'Semantic retrieval needs setup'}
+              title={semanticReady ? 'Semantic search ready' : 'Semantic search needs setup'}
+              aria-label={semanticReady ? 'Semantic search ready' : 'Semantic search needs setup'}
             >
               {semanticReady ? (
                 <>
@@ -6054,7 +6039,7 @@ EMBEDDING_PROVIDER=openai
 EMBEDDING_API_KEY=sk-...
 EMBEDDING_MODEL=text-embedding-3-small`}</code></pre>
             <p className="mt-2 text-xs text-muted-foreground">
-              Model Settings controls the Workspace Agent. Embedding settings live in the server environment because CRMy uses them for background indexing and semantic retrieval.
+              Model Settings controls the Workspace Agent. Embedding settings live in the server environment because CRMy uses them for background indexing and semantic search.
               {dbInfo?.embedding_configured && dbInfo.embedding_provider ? ` Current embedding provider: ${dbInfo.embedding_provider}${dbInfo.embedding_model ? ` · ${dbInfo.embedding_model}` : ''}.` : ''}
             </p>
           </div>

@@ -40,6 +40,7 @@ export interface ProviderDef {
   requiresKey: boolean;
   keyLabel: string;
   modelLabel: string;
+  modelPlaceholder?: string;
   baseUrlPlaceholder: string;
   setupHint: string;
   models: ModelDef[];
@@ -70,17 +71,37 @@ export const PROVIDERS: ProviderDef[] = [
       {
         id: 'claude-sonnet-4-20250514',
         label: 'Claude Sonnet 4',
-        description: 'Recommended balance for Workspace Agent use.',
+        description: 'CRMy-certified default for automatic Memory.',
+      },
+      {
+        id: 'claude-fable-5',
+        label: 'Claude Fable 5',
+        description: 'Current highest-capability Claude option; run crmy certify before automatic Memory.',
+      },
+      {
+        id: 'claude-opus-4-8',
+        label: 'Claude Opus 4.8',
+        description: 'Higher capability Claude 4 option when latency/cost are acceptable.',
+      },
+      {
+        id: 'claude-sonnet-4-6',
+        label: 'Claude Sonnet 4.6',
+        description: 'Current Sonnet family option; run crmy certify before automatic Memory.',
       },
       {
         id: 'claude-opus-4-20250514',
         label: 'Claude Opus 4',
-        description: 'Higher reasoning capability when latency/cost are acceptable.',
+        description: 'Legacy Claude 4 option when available on your account.',
+      },
+      {
+        id: 'claude-haiku-4-5-20251001',
+        label: 'Claude Haiku 4.5',
+        description: 'Fast Claude 4.5 option for lightweight tasks.',
       },
       {
         id: 'claude-3-5-haiku-20241022',
         label: 'Claude Haiku 3.5',
-        description: 'Fast, lower-cost option for lightweight tasks.',
+        description: 'Legacy fast, lower-cost option for lightweight tasks.',
       },
     ],
   },
@@ -102,12 +123,32 @@ export const PROVIDERS: ProviderDef[] = [
       {
         id: 'gpt-5.2',
         label: 'GPT-5.2',
-        description: 'Recommended current OpenAI option for agentic tasks.',
+        description: 'CRMy-certified default for automatic Memory.',
+      },
+      {
+        id: 'gpt-5.5',
+        label: 'GPT-5.5',
+        description: 'Current flagship OpenAI option; run crmy certify before automatic Memory.',
+      },
+      {
+        id: 'gpt-5.4',
+        label: 'GPT-5.4',
+        description: 'Current general-purpose GPT-5 family model.',
+      },
+      {
+        id: 'gpt-5.4-mini',
+        label: 'GPT-5.4 mini',
+        description: 'Lower-latency GPT-5.4 family option.',
+      },
+      {
+        id: 'gpt-5.4-nano',
+        label: 'GPT-5.4 nano',
+        description: 'Smallest GPT-5.4 family option for fast, low-cost routing.',
       },
       {
         id: 'gpt-5.1',
         label: 'GPT-5.1',
-        description: 'Strong reasoning with configurable effort.',
+        description: 'Previous strong reasoning option.',
       },
       {
         id: 'gpt-5',
@@ -129,6 +170,7 @@ export const PROVIDERS: ProviderDef[] = [
     requiresKey: true,
     keyLabel: 'Azure OpenAI API key',
     modelLabel: 'Deployment name',
+    modelPlaceholder: 'my-gpt-deployment',
     baseUrlPlaceholder: 'https://YOUR-RESOURCE-NAME.openai.azure.com/openai/v1',
     setupHint: 'Use the Azure OpenAI v1 base URL and your deployment name as the model. Microsoft Entra bearer tokens can be pasted as the key for manual testing.',
     isAnthropicFormat: false,
@@ -153,14 +195,39 @@ export const PROVIDERS: ProviderDef[] = [
     supportsThinking: true,
     models: [
       {
-        id: 'gemini-2.5-flash',
-        label: 'Gemini 2.5 Flash',
-        description: 'Fast Gemini option with function calling support.',
+        id: 'gemini-3.5-flash',
+        label: 'Gemini 3.5 Flash',
+        description: 'Current stable Gemini Flash option with function calling support.',
+      },
+      {
+        id: 'gemini-3.1-pro-preview',
+        label: 'Gemini 3.1 Pro Preview',
+        description: 'Higher-capability Gemini option while preview access is available.',
+      },
+      {
+        id: 'gemini-3-flash-preview',
+        label: 'Gemini 3 Flash Preview',
+        description: 'Preview Gemini 3 Flash route for fast agent tasks.',
+      },
+      {
+        id: 'gemini-3.1-flash-lite',
+        label: 'Gemini 3.1 Flash-Lite',
+        description: 'Small, low-latency Gemini 3.1 option.',
       },
       {
         id: 'gemini-2.5-pro',
         label: 'Gemini 2.5 Pro',
-        description: 'Higher-capability Gemini option when available on your account.',
+        description: 'Previous higher-capability Gemini option.',
+      },
+      {
+        id: 'gemini-2.5-flash',
+        label: 'Gemini 2.5 Flash',
+        description: 'Previous stable Gemini Flash option.',
+      },
+      {
+        id: 'gemini-2.5-flash-lite',
+        label: 'Gemini 2.5 Flash-Lite',
+        description: 'Previous low-latency Gemini option.',
       },
     ],
   },
@@ -207,19 +274,34 @@ export const PROVIDERS: ProviderDef[] = [
     supportsThinking: true,
     models: [
       {
+        id: 'mistral-medium-3-5+2',
+        label: 'Mistral Medium 3.5',
+        description: 'Current frontier Mistral option; run crmy certify before automatic Memory.',
+      },
+      {
+        id: 'mistral-small-2603+1',
+        label: 'Mistral Small 4',
+        description: 'Current efficient hybrid Mistral option for lower-latency routing.',
+      },
+      {
+        id: 'ministral-14b-2512+1',
+        label: 'Ministral 14B',
+        description: 'Efficient Mistral option for lower-latency routing.',
+      },
+      {
         id: 'mistral-large-latest',
         label: 'Mistral Large',
-        description: 'General high-capability Mistral option with function calling.',
+        description: 'Legacy high-capability alias with function calling.',
       },
       {
         id: 'mistral-medium-latest',
         label: 'Mistral Medium',
-        description: 'Balanced Mistral option.',
+        description: 'Legacy balanced alias.',
       },
       {
         id: 'mistral-small-latest',
         label: 'Mistral Small',
-        description: 'Lower-latency Mistral option.',
+        description: 'Legacy lower-latency alias.',
       },
     ],
   },
@@ -231,6 +313,7 @@ export const PROVIDERS: ProviderDef[] = [
     requiresKey: false,
     keyLabel: 'LiteLLM virtual key',
     modelLabel: 'Proxy model name',
+    modelPlaceholder: 'customer-context-agent',
     baseUrlPlaceholder: 'http://localhost:4000/v1',
     setupHint: 'Use when a team manages routing, spend, and provider credentials through a LiteLLM proxy. Add a virtual key if your proxy requires one.',
     isAnthropicFormat: false,
@@ -282,9 +365,14 @@ export const PROVIDERS: ProviderDef[] = [
     supportsThinking: false,
     models: [
       {
+        id: 'qwen3:8b',
+        label: 'Qwen 3 8B',
+        description: 'Current local default when installed and tool calling works.',
+      },
+      {
         id: 'qwen2.5:7b-instruct',
         label: 'Qwen 2.5 7B Instruct',
-        description: 'Good local default when installed and tool calling works.',
+        description: 'Previous good local default when installed and tool calling works.',
       },
       {
         id: 'llama3.1:8b',
@@ -301,6 +389,7 @@ export const PROVIDERS: ProviderDef[] = [
     requiresKey: true,
     keyLabel: 'Databricks token',
     modelLabel: 'Served model or endpoint model',
+    modelPlaceholder: 'my-serving-endpoint',
     baseUrlPlaceholder: 'https://YOUR-WORKSPACE.cloud.databricks.com/serving-endpoints',
     setupHint: 'Use your Databricks workspace serving-endpoints base URL and set model to the serving endpoint name. Function calling must be enabled/supported on the endpoint.',
     isAnthropicFormat: false,
@@ -344,6 +433,7 @@ export const PROVIDERS: ProviderDef[] = [
     requiresKey: false,
     keyLabel: 'API key',
     modelLabel: 'Model ID',
+    modelPlaceholder: 'your-model-id',
     baseUrlPlaceholder: 'https://your-gateway.example.com/v1',
     setupHint: 'Use any endpoint that implements OpenAI-compatible Chat Completions with tool/function calling.',
     isAnthropicFormat: false,

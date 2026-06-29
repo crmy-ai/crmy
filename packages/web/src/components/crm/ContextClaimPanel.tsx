@@ -8,11 +8,21 @@ function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
 
-export function claimScoreColor(value: number) {
+const SCORE_READY_COLOR = '#2f9e63';
+const SCORE_WARN_COLOR = '#d97706';
+const SCORE_LOW_COLOR = '#dc2626';
+const SCORE_NEUTRAL_COLOR = '#64748b';
+
+export function claimScoreColor(value: number, threshold?: number) {
   const pct = Math.round(clamp01(value) * 100);
-  if (pct >= 70) return '#22c55e';
-  if (pct >= 40) return '#f59e0b';
-  return '#ef4444';
+  if (typeof threshold === 'number' && Number.isFinite(threshold)) {
+    const thresholdPct = Math.round(clamp01(threshold) * 100);
+    if (pct >= thresholdPct) return SCORE_READY_COLOR;
+    return SCORE_NEUTRAL_COLOR;
+  }
+  if (pct >= 70) return SCORE_READY_COLOR;
+  if (pct >= 40) return SCORE_WARN_COLOR;
+  return SCORE_LOW_COLOR;
 }
 
 export function ClaimScoreBar({
@@ -20,14 +30,19 @@ export function ClaimScoreBar({
   value,
   trailing,
   marker,
+  threshold,
+  colorMode = 'score',
 }: {
   label: string;
   value: number;
   trailing?: ReactNode;
   marker?: { value: number; label: string };
+  threshold?: number;
+  colorMode?: 'score' | 'neutral';
 }) {
   const pct = Math.round(clamp01(value) * 100);
-  const color = claimScoreColor(value);
+  const effectiveThreshold = typeof threshold === 'number' ? threshold : marker?.value;
+  const color = colorMode === 'neutral' ? SCORE_NEUTRAL_COLOR : claimScoreColor(value, effectiveThreshold);
   const markerPct = marker ? Math.round(clamp01(marker.value) * 100) : null;
   return (
     <div className="mt-3 space-y-2">
@@ -60,6 +75,37 @@ export function ClaimScoreBar({
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+export function CompactScoreBar({
+  label,
+  value,
+  trailing,
+  threshold,
+  colorMode = 'score',
+}: {
+  label: string;
+  value: number;
+  trailing?: ReactNode;
+  threshold?: number;
+  colorMode?: 'score' | 'neutral';
+}) {
+  const pct = Math.round(clamp01(value) * 100);
+  const color = colorMode === 'neutral' ? SCORE_NEUTRAL_COLOR : claimScoreColor(value, threshold);
+  return (
+    <div className="mt-3 space-y-1.5">
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="font-medium text-muted-foreground">{label}</span>
+        <span className="font-semibold tabular-nums" style={{ color }}>{trailing ?? `${pct}%`}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${pct}%`, backgroundColor: color }}
+        />
       </div>
     </div>
   );

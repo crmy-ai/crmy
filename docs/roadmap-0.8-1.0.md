@@ -28,9 +28,9 @@ CRMy is the **governed, cross-CRM action-and-proof control plane for customer-fa
 
 ### Thesis verdict (why we are refocusing)
 
-The original thesis — "context alone is insufficient; agents need a durable *truth* layer" — is only half right, and the right half is not the half we led with. What the codebase actually proves is **provenance + action-gating + audit**, not "truth." Three consequences:
+The original thesis overstated what any customer-context system can know. The defensible thesis is that retrieved context is insufficient for autonomous customer-facing agents; they need a provenance-checked, decay-aware governance layer that maintains evidence over time and gates action with proof. What the codebase actually proves is **provenance + action-gating + audit**, not settled truth. Three consequences:
 
-- "Confirmed Memory" is **provenance-checked, corroborated inference**, not verified truth. Our language must stop overselling the epistemics.
+- "Confirmed Memory" is **provenance-checked, corroborated inference**, not verified certainty. Our language must stop overselling the epistemics.
 - The most defensible, least-copyable code is `action_context_get` (operational state) and grounded promotion (provenance) — **not** the memory store.
 - Long context windows and model-native memory will commoditize retrieval/compression. They will **not** commoditize provenance, policy gating, approval, writeback governance, or audit. Invest in the durable layers.
 

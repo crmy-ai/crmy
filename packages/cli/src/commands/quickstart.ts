@@ -39,17 +39,46 @@ function printNeedsInit(): void {
   console.log(`  Run ${CYAN}crmy init --demo${RESET} once (creates the schema, owner, and keys), then ${CYAN}crmy quickstart${RESET}.\n`);
 }
 
-/** True when a Workspace Agent model is configured for live extraction. */
-async function detectModelConfigured(pool: import('pg').Pool, tenantId: string): Promise<boolean> {
+type ModelReadiness = {
+  configured: boolean;
+  automaticMemoryEnabled: boolean;
+  certificationStatus: string | null;
+};
+
+/** Read enough Workspace Agent state to explain live extraction and automatic Memory. */
+async function detectModelReadiness(pool: import('pg').Pool, tenantId: string): Promise<ModelReadiness> {
   try {
-    const res = await pool.query<{ enabled: boolean; model: string | null; base_url: string | null }>(
-      'SELECT enabled, model, base_url FROM agent_configs WHERE tenant_id = $1 LIMIT 1',
+    const res = await pool.query<{
+      enabled: boolean;
+      model: string | null;
+      base_url: string | null;
+      auto_promote_signals: boolean | null;
+      model_certification_status: string | null;
+      model_certification_profile: string | null;
+      model_certification_run_id: string | null;
+      model_certification_score: number | null;
+    }>(
+      `SELECT enabled, model, base_url, auto_promote_signals,
+              model_certification_status, model_certification_profile,
+              model_certification_run_id, model_certification_score
+       FROM agent_configs WHERE tenant_id = $1 LIMIT 1`,
       [tenantId],
     );
     const row = res.rows[0];
-    return Boolean(row?.enabled && row.model && row.base_url);
+    const configured = Boolean(row?.enabled && row.model && row.base_url);
+    const certified = row?.model_certification_status === 'certified'
+      && row.model_certification_profile === 'live_model'
+      && typeof row.model_certification_run_id === 'string'
+      && row.model_certification_run_id.trim().length > 0
+      && typeof row.model_certification_score === 'number'
+      && row.model_certification_score >= 0.85;
+    return {
+      configured,
+      automaticMemoryEnabled: configured && row?.auto_promote_signals !== false && certified,
+      certificationStatus: row?.model_certification_status ?? null,
+    };
   } catch {
-    return false;
+    return { configured: false, automaticMemoryEnabled: false, certificationStatus: null };
   }
 }
 
@@ -68,7 +97,7 @@ async function resolveTenantId(pool: import('pg').Pool, configuredTenant: unknow
   return fallback.rows.length > 0 ? fallback.rows[0].id : null;
 }
 
-function printNextSteps(account: string, modelConfigured: boolean, withModel: boolean): void {
+function printNextSteps(account: string, modelReadiness: ModelReadiness, withModel: boolean): void {
   console.log(`\n  ${BOLD}That briefing came from messy context — with no CRM connector configured.${RESET}`);
   console.log(`  ${DIM}Signals, Memory, Action Context, and lineage are all from local seeded transcripts/notes.${RESET}\n`);
   console.log(`  ${BOLD}Next:${RESET}\n`);
@@ -79,10 +108,14 @@ function printNextSteps(account: string, modelConfigured: boolean, withModel: bo
   console.log(`     ${CYAN}crmy server start${RESET}  ${DIM}→ http://localhost:3000/app${RESET}\n`);
   console.log(`  ${GREEN}3.${RESET} Drop in your own customer context (still no connector):`);
   console.log(`     ${CYAN}crmy context ingest --subject "account:${account}" --file ./call-notes.txt${RESET}`);
-  if (!modelConfigured) {
+  if (!modelReadiness.configured) {
     console.log(`     ${DIM}Configure a Workspace Agent model in Settings to extract Signals from it automatically.${RESET}`);
   } else if (!withModel) {
     console.log(`     ${DIM}A model is configured — re-run with ${RESET}${CYAN}--with-model${RESET}${DIM} to watch live transcript → Signal extraction.${RESET}`);
+  }
+  if (modelReadiness.configured && !modelReadiness.automaticMemoryEnabled) {
+    console.log(`     ${DIM}Automatic Memory is review-only until this model passes:${RESET} ${CYAN}crmy certify --output ./eval-runs${RESET}`);
+    console.log(`     ${DIM}CRMy will not let an unproven model invent customer truth.${RESET}`);
   }
   console.log('');
   console.log(`  ${DIM}Optional later: connect a CRM or warehouse as a system of record — see \`crmy systems --help\`.${RESET}\n`);
@@ -131,7 +164,7 @@ export function quickstartCommand(): Command {
       const pool = new Pool({ connectionString: databaseUrl });
       const spinner = json ? null : createSpinner('Preparing connector-free demo workspace...');
       let tenantId: string;
-      let modelConfigured = false;
+      let modelReadiness: ModelReadiness = { configured: false, automaticMemoryEnabled: false, certificationStatus: null };
 
       try {
         await pool.query('SELECT 1');
@@ -156,7 +189,7 @@ export function quickstartCommand(): Command {
           spinner?.succeed('Demo workspace ready (no connector configured)');
         }
 
-        modelConfigured = await detectModelConfigured(pool, tenantId);
+        modelReadiness = await detectModelReadiness(pool, tenantId);
       } catch (err) {
         spinner?.fail('Could not reach PostgreSQL');
         if (!json) printDbUnreachable((err as Error).message);
@@ -169,7 +202,7 @@ export function quickstartCommand(): Command {
       // Connector-free golden path: resolve → briefing → Action Context → Signals → lineage.
       // Live model extraction is opt-in: it is a bonus, not the connector-free value,
       // and keeping it off by default makes quickstart deterministic and safe to re-run.
-      const withModel = Boolean(opts.withModel) && modelConfigured;
+      const withModel = Boolean(opts.withModel) && modelReadiness.configured;
       const result = await runAgentSmoke({ account, withModel, config: opts.config as string | undefined, json });
 
       // Exit on the connector-free core path; an optional model hiccup must not mask success.
@@ -178,7 +211,7 @@ export function quickstartCommand(): Command {
         .filter(check => CORE_CHECKS.includes(check.name))
         .every(check => check.ok);
 
-      if (!json) printNextSteps(account, modelConfigured, withModel);
+      if (!json) printNextSteps(account, modelReadiness, withModel);
       process.exit(coreOk ? 0 : 1);
     });
 }

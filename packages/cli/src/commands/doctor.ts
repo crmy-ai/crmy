@@ -37,6 +37,7 @@ export function doctorCommand(): Command {
   return new Command('doctor')
     .description('Check CRMy config, database, migrations, model readiness, port, pgvector, and secrets')
     .option('--port <port>', 'Port to check availability for', '3000')
+    .option('--skip-model-check', 'Skip Workspace Agent model configuration and provider checks')
     .option('--skip-model-test', 'Check saved model config without calling the provider')
     .action(async (opts) => {
       console.log('\n  CRMy Doctor\n  ══════════════════════════════════════\n');
@@ -179,82 +180,109 @@ export function doctorCommand(): Command {
           }
 
           // ── Check 8: Workspace Agent model readiness ─────────────────────
-          try {
-            const tenantLookup = config.tenantId ?? 'default';
-            const agent = await db.query(
-              `SELECT ac.enabled, ac.provider, ac.base_url, ac.model, ac.api_key_enc
-               FROM agent_configs ac
-               JOIN tenants t ON t.id = ac.tenant_id
-               WHERE t.id::text = $1 OR t.slug = $1
-               ORDER BY ac.updated_at DESC
-               LIMIT 1`,
-              [tenantLookup],
-            );
-            const row = agent.rows[0];
-            if (!row) {
-              fail('Workspace Agent model is not configured', 'Run `crmy init` interactively or open Settings -> Model.');
-              failed++;
-            } else if (!row.enabled) {
-              fail('Workspace Agent model is saved but disabled', 'Enable it in Settings -> Model or rerun `crmy init`.');
-              failed++;
-            } else if (!row.provider || !row.base_url || !row.model) {
-              fail('Workspace Agent model config is incomplete', 'Set provider, base URL, and model in Settings -> Model.');
-              failed++;
-            } else {
-              const provider = String(row.provider);
-              const providerDef = getProvider(provider);
-              if (providerDef.requiresKey && !row.api_key_enc) {
-                fail(`${providerDef.label} model is missing an API key`, 'Save an API key in Settings -> Model or rerun `crmy init`.');
+          if (opts.skipModelCheck) {
+            info('Workspace Agent model check skipped; connector-free demo and review-only mode can still run.');
+          } else {
+            try {
+              const tenantLookup = config.tenantId ?? 'default';
+              const agent = await db.query(
+                `SELECT ac.enabled, ac.provider, ac.base_url, ac.model, ac.api_key_enc,
+                        ac.auto_promote_signals, ac.model_certification_status,
+                        ac.model_certification_profile, ac.model_certification_run_id,
+                        ac.model_certification_score
+                 FROM agent_configs ac
+                 JOIN tenants t ON t.id = ac.tenant_id
+                 WHERE t.id::text = $1 OR t.slug = $1
+                 ORDER BY ac.updated_at DESC
+                 LIMIT 1`,
+                [tenantLookup],
+              );
+              const row = agent.rows[0];
+              if (!row) {
+                fail('Workspace Agent model is not configured', 'Run `crmy init` interactively or open Settings -> Model.');
                 failed++;
-              } else if (opts.skipModelTest) {
-                pass(`Workspace Agent configured (${providerDef.label} · ${row.model})`);
-                passed++;
+              } else if (!row.enabled) {
+                fail('Workspace Agent model is saved but disabled', 'Enable it in Settings -> Model or rerun `crmy init`.');
+                failed++;
+              } else if (!row.provider || !row.base_url || !row.model) {
+                fail('Workspace Agent model config is incomplete', 'Set provider, base URL, and model in Settings -> Model.');
+                failed++;
               } else {
-                try {
-                  const jwt = config.jwtSecret ?? process.env.JWT_SECRET;
-                  if (jwt) process.env.JWT_SECRET = jwt;
-                  const {
-                    decryptAgentSecret,
-                    buildOpenAICompatibleHeaders,
-                    verifyAgentToolCalling,
-                  } = await import('@crmy/server');
-                  const baseUrl = String(row.base_url).replace(/\/+$/, '');
-                  const apiKey = row.api_key_enc ? decryptAgentSecret(String(row.api_key_enc)).trim() : '';
-                  const readiness = provider === 'anthropic'
-                    ? await verifyAgentToolCalling({ provider, baseUrl, model: String(row.model), apiKey })
-                    : await verifyAgentToolCalling({
-                      provider,
-                      baseUrl,
-                      model: String(row.model),
-                      apiKey,
-                      headers: buildOpenAICompatibleHeaders(baseUrl, apiKey, provider),
-                    });
-                  if (readiness.ok && readiness.tool_calling_verified !== false) {
-                    pass(`Workspace Agent online (${providerDef.label} · ${row.model})`);
+                const provider = String(row.provider);
+                const providerDef = getProvider(provider);
+                const certified = row.model_certification_status === 'certified'
+                  && row.model_certification_profile === 'live_model'
+                  && typeof row.model_certification_run_id === 'string'
+                  && row.model_certification_run_id.trim().length > 0
+                  && typeof row.model_certification_score === 'number'
+                  && row.model_certification_score >= 0.85;
+                const printCertificationState = () => {
+                  if (row.auto_promote_signals === false) {
+                    info('Automatic Memory is disabled in model settings.');
+                  } else if (certified) {
+                    pass(`Automatic Memory certification ready (${Math.round(Number(row.model_certification_score) * 100)}%)`);
                     passed++;
-                  } else if (readiness.ok) {
-                    pass(`Workspace Agent reachable (${providerDef.label} · ${row.model}; tool calling unverified)`);
-                    passed++;
-                    info(readiness.warning ?? 'Tool calling could not be verified; run a first agent request carefully.');
                   } else {
+                    info('Automatic Memory is review-only until this exact model passes `crmy certify --output ./eval-runs`.');
+                    info('CRMy will not let an unproven model invent customer truth.');
+                  }
+                };
+                if (providerDef.requiresKey && !row.api_key_enc) {
+                  fail(`${providerDef.label} model is missing an API key`, 'Save an API key in Settings -> Model or rerun `crmy init`.');
+                  failed++;
+                } else if (opts.skipModelTest) {
+                  pass(`Workspace Agent configured (${providerDef.label} · ${row.model})`);
+                  passed++;
+                  printCertificationState();
+                } else {
+                  try {
+                    const jwt = config.jwtSecret ?? process.env.JWT_SECRET;
+                    if (jwt) process.env.JWT_SECRET = jwt;
+                    const {
+                      decryptAgentSecret,
+                      buildOpenAICompatibleHeaders,
+                      verifyAgentToolCalling,
+                    } = await import('@crmy/server');
+                    const baseUrl = String(row.base_url).replace(/\/+$/, '');
+                    const apiKey = row.api_key_enc ? decryptAgentSecret(String(row.api_key_enc)).trim() : '';
+                    const readiness = provider === 'anthropic'
+                      ? await verifyAgentToolCalling({ provider, baseUrl, model: String(row.model), apiKey })
+                      : await verifyAgentToolCalling({
+                        provider,
+                        baseUrl,
+                        model: String(row.model),
+                        apiKey,
+                        headers: buildOpenAICompatibleHeaders(baseUrl, apiKey, provider),
+                      });
+                    if (readiness.ok && readiness.tool_calling_verified !== false) {
+                      pass(`Workspace Agent online (${providerDef.label} · ${row.model})`);
+                      passed++;
+                      printCertificationState();
+                    } else if (readiness.ok) {
+                      pass(`Workspace Agent reachable (${providerDef.label} · ${row.model}; tool calling unverified)`);
+                      passed++;
+                      info(readiness.warning ?? 'Tool calling could not be verified; run a first agent request carefully.');
+                      printCertificationState();
+                    } else {
+                      fail(
+                        `Workspace Agent unreachable (${providerDef.label} · ${row.model})`,
+                        readiness.error ?? 'Check provider URL, model ID, API key, and local runtime.',
+                      );
+                      failed++;
+                    }
+                  } catch (err) {
                     fail(
-                      `Workspace Agent unreachable (${providerDef.label} · ${row.model})`,
-                      readiness.error ?? 'Check provider URL, model ID, API key, and local runtime.',
+                      `Workspace Agent readiness failed: ${(err as Error).message}`,
+                      'Check Settings -> Model or run `crmy doctor --skip-model-test` to verify saved config only.',
                     );
                     failed++;
                   }
-                } catch (err) {
-                  fail(
-                    `Workspace Agent readiness failed: ${(err as Error).message}`,
-                    'Check Settings -> Model or run `crmy doctor --skip-model-test` to verify saved config only.',
-                  );
-                  failed++;
                 }
               }
+            } catch (err) {
+              fail(`Could not check Workspace Agent config: ${(err as Error).message}`, 'Run migrations, then configure Settings -> Model.');
+              failed++;
             }
-          } catch (err) {
-            fail(`Could not check Workspace Agent config: ${(err as Error).message}`, 'Run migrations, then configure Settings -> Model.');
-            failed++;
           }
 
           await closePool();

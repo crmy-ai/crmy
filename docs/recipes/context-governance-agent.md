@@ -26,7 +26,7 @@ Workflow:
 3. Batch-review only high-confidence facts that are confirmed by recent activity or briefing evidence. Use `context_review_batch`.
 4. For stale entries needing judgment, call `context_stale_assign` with an idempotency key.
 5. For important accounts and opportunities, call `context_detect_contradictions`.
-6. If contradictions exist, call `context_contradiction_assign`. Do not decide the truth unless the source evidence is explicit and recent.
+6. If contradictions exist, call `context_contradiction_assign`. Do not resolve the claim unless the source evidence is explicit and recent.
 7. Use `context_consolidate` only for redundant entries of the same type on the same subject.
 8. Call `briefing_get` after cleanup to verify what future agents will see.
 9. Log the governance run with `activity_create`.

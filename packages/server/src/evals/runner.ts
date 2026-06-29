@@ -26,7 +26,7 @@ import { DEFAULT_CONTEXT_TYPES } from '../db/repos/context-type-registry.js';
 import { extractContextFromActivity, parseExtractionOutput, shouldAutoPromoteSignal } from '../agent/extraction.js';
 import { encrypt } from '../agent/crypto.js';
 import { evaluateMemoryReadiness } from '../services/memory-readiness.js';
-import { memoryClaimTier, memoryFreshnessWindowDays } from '../services/memory-trust.js';
+import { canAutoPromoteSignalByTrustTier, memoryClaimTier, memoryFreshnessWindowDays, type Tier2AutopromotePolicy } from '../services/memory-trust.js';
 import { detectRawContextSubjects } from '../services/raw-context-subjects.js';
 import { assembleBriefing } from '../services/briefing.js';
 import { getActionContext } from '../services/action-context.js';
@@ -57,7 +57,7 @@ const CONTRACT_SUITES: EvalSuiteName[] = [
 ];
 
 const LIVE_MODEL_SUITES: EvalSuiteName[] = ['raw_context_extraction_quality'];
-const SEEDED_CONTEXT_SUITES: EvalSuiteName[] = ['retrieval_quality', 'action_context', 'source_attribution', 'connector_certification'];
+const SEEDED_CONTEXT_SUITES: EvalSuiteName[] = ['retrieval_quality', 'action_context', 'source_attribution', 'high_impact_autopromote', 'connector_certification'];
 const AGENT_RUNTIME_SUITES: EvalSuiteName[] = ['tool_choice', 'agent_trajectory'];
 const IMPLEMENTED_SUITES: EvalSuiteName[] = [
   ...CONTRACT_SUITES,
@@ -90,6 +90,7 @@ const PROFILE_THRESHOLDS: Record<EvalRunProfile, EvalThreshold[]> = {
     { metric: 'contract_shape_accuracy', op: '=', value: 1 },
     { metric: 'readiness_decision_accuracy', op: '=', value: 1 },
     { metric: 'high_risk_false_allow', op: '=', value: 0 },
+    { metric: 'high_impact_autopromote_false_allow', op: '=', value: 0 },
     { metric: 'unsafe_customer_claim_allowed', op: '=', value: 0 },
     { metric: 'connector_contract_parity', op: '=', value: 1 },
     { metric: 'sor_conflict_deferral', op: '=', value: 1 },
@@ -168,6 +169,20 @@ const SUITE_META: Record<EvalSuiteName, Omit<EvalSuiteSummary, 'case_count'>> = 
     quality_gate: true,
     uses_golden_model_output: false,
     limitations: ['Seed corpus is intentionally small in 0.9.3; broaden with customer-derived traces before 1.0.'],
+  },
+  high_impact_autopromote: {
+    name: 'high_impact_autopromote',
+    title: 'High-impact auto-promotion safety',
+    description: 'Deterministic Tier-2 promotion gate cases for forecast, commitment, and deal-risk Memory.',
+    deterministic: true,
+    requires_model: false,
+    requires_database: false,
+    implementation_status: 'implemented',
+    proof_scope: 'Proves high-impact Memory cannot auto-promote from one source, duplicate sources, stale evidence, ungrounded evidence, conflicts, incomplete readiness, or human-only policy; only recent independent grounded corroboration may pass.',
+    profiles: ['seeded_context'],
+    quality_gate: true,
+    uses_golden_model_output: false,
+    limitations: ['Exercises the pure promotion gate inputs rather than running a live extraction model.'],
   },
   action_context: {
     name: 'action_context',
@@ -300,6 +315,20 @@ export type EvalAgentModelCaller = (input: {
   config: AgentConfig;
 }) => Promise<{ content: string; tool_calls: ToolCallRecord[] }>;
 
+type HighImpactAutopromoteInput = {
+  contextType: string;
+  confidence: number;
+  threshold: number;
+  evidenceCount: number;
+  independentSourceCount: number;
+  tier2AutopromotePolicy: Tier2AutopromotePolicy;
+  recencySatisfied: boolean;
+  sourceGrounded: boolean;
+  readinessReady: boolean;
+};
+
+type HighImpactAutopromoteEvaluator = (input: HighImpactAutopromoteInput) => boolean;
+
 export interface RunEvalOptions {
   suites?: EvalSuiteName[];
   profile?: EvalRunProfile;
@@ -315,6 +344,7 @@ export interface RunEvalOptions {
   exportFormats?: string[];
   liveExtractionModelCaller?: LiveExtractionModelCaller;
   agentModelCaller?: EvalAgentModelCaller;
+  highImpactAutopromoteEvaluator?: HighImpactAutopromoteEvaluator;
 }
 
 /** Suites driven by a CorpusFixture array, so external cases can replace the bundled corpus. */
@@ -492,6 +522,135 @@ function speculativeText(title?: string, body?: string): boolean {
 
 function scoreBoolean(pass: boolean): number {
   return pass ? 1 : 0;
+}
+
+type HighImpactAutopromoteCase = HighImpactAutopromoteInput & {
+  id: string;
+  title: string;
+  expectedAllowed: boolean;
+  expectedBlockers: string[];
+};
+
+const HIGH_IMPACT_AUTOPROMOTE_CASES: HighImpactAutopromoteCase[] = [
+  {
+    id: 'tier2_single_source_blocked',
+    title: 'Tier-2 deal risk from one source stays review-only',
+    contextType: 'deal_risk',
+    confidence: 0.93,
+    threshold: 0.85,
+    evidenceCount: 1,
+    independentSourceCount: 1,
+    tier2AutopromotePolicy: 'corroborated',
+    recencySatisfied: true,
+    sourceGrounded: true,
+    readinessReady: true,
+    expectedAllowed: false,
+    expectedBlockers: ['needs_two_independent_sources'],
+  },
+  {
+    id: 'tier2_duplicate_same_source_blocked',
+    title: 'Tier-2 forecast from duplicate same-source Signals stays review-only',
+    contextType: 'forecast_signal',
+    confidence: 0.94,
+    threshold: 0.85,
+    evidenceCount: 2,
+    independentSourceCount: 1,
+    tier2AutopromotePolicy: 'corroborated',
+    recencySatisfied: true,
+    sourceGrounded: true,
+    readinessReady: true,
+    expectedAllowed: false,
+    expectedBlockers: ['duplicate_source_not_independent'],
+  },
+  {
+    id: 'tier2_stale_recency_blocked',
+    title: 'Tier-2 commitment with stale corroboration stays review-only',
+    contextType: 'commitment',
+    confidence: 0.94,
+    threshold: 0.85,
+    evidenceCount: 2,
+    independentSourceCount: 2,
+    tier2AutopromotePolicy: 'corroborated',
+    recencySatisfied: false,
+    sourceGrounded: true,
+    readinessReady: true,
+    expectedAllowed: false,
+    expectedBlockers: ['recency_not_satisfied'],
+  },
+  {
+    id: 'tier2_ungrounded_blocked',
+    title: 'Tier-2 forecast without source grounding stays review-only',
+    contextType: 'forecast',
+    confidence: 0.94,
+    threshold: 0.85,
+    evidenceCount: 2,
+    independentSourceCount: 2,
+    tier2AutopromotePolicy: 'corroborated',
+    recencySatisfied: true,
+    sourceGrounded: false,
+    readinessReady: true,
+    expectedAllowed: false,
+    expectedBlockers: ['source_not_grounded'],
+  },
+  {
+    id: 'tier2_conflict_readiness_blocked',
+    title: 'Tier-2 deal risk with conflict/readiness blocker stays review-only',
+    contextType: 'deal_risk',
+    confidence: 0.94,
+    threshold: 0.85,
+    evidenceCount: 2,
+    independentSourceCount: 2,
+    tier2AutopromotePolicy: 'corroborated',
+    recencySatisfied: true,
+    sourceGrounded: true,
+    readinessReady: false,
+    expectedAllowed: false,
+    expectedBlockers: ['readiness_not_ready'],
+  },
+  {
+    id: 'tier2_human_only_blocked',
+    title: 'Tier-2 forecast under human-only policy stays review-only',
+    contextType: 'forecast_signal',
+    confidence: 0.99,
+    threshold: 0.85,
+    evidenceCount: 3,
+    independentSourceCount: 3,
+    tier2AutopromotePolicy: 'human_only',
+    recencySatisfied: true,
+    sourceGrounded: true,
+    readinessReady: true,
+    expectedAllowed: false,
+    expectedBlockers: ['tier2_policy_human_only'],
+  },
+  {
+    id: 'tier2_independent_recent_grounded_allowed',
+    title: 'Tier-2 deal risk with independent recent grounded corroboration may auto-promote',
+    contextType: 'deal_risk',
+    confidence: 0.93,
+    threshold: 0.85,
+    evidenceCount: 2,
+    independentSourceCount: 2,
+    tier2AutopromotePolicy: 'corroborated',
+    recencySatisfied: true,
+    sourceGrounded: true,
+    readinessReady: true,
+    expectedAllowed: true,
+    expectedBlockers: [],
+  },
+];
+
+function highImpactBlockers(input: HighImpactAutopromoteInput): string[] {
+  const blockers: string[] = [];
+  if (input.evidenceCount < 1) blockers.push('no_evidence');
+  if (!input.sourceGrounded) blockers.push('source_not_grounded');
+  if (!input.readinessReady) blockers.push('readiness_not_ready');
+  if (input.confidence < input.threshold) blockers.push('below_threshold');
+  if (input.tier2AutopromotePolicy === 'human_only') blockers.push('tier2_policy_human_only');
+  if (!input.recencySatisfied) blockers.push('recency_not_satisfied');
+  if (input.independentSourceCount < 2) {
+    blockers.push(input.evidenceCount >= 2 ? 'duplicate_source_not_independent' : 'needs_two_independent_sources');
+  }
+  return Array.from(new Set(blockers));
 }
 
 function compactText(value: unknown, max = 180): string {
@@ -1674,6 +1833,66 @@ async function runRetrievalQualitySuite(): Promise<EvalCaseSummary[]> {
   }
 }
 
+function defaultHighImpactAutopromoteEvaluator(input: HighImpactAutopromoteInput): boolean {
+  return canAutoPromoteSignalByTrustTier({
+    contextType: input.contextType,
+    claimTier: memoryClaimTier(input.contextType),
+    confidence: input.confidence,
+    threshold: input.threshold,
+    evidenceCount: input.evidenceCount,
+    independentSourceCount: input.independentSourceCount,
+    tier2AutopromotePolicy: input.tier2AutopromotePolicy,
+    recencySatisfied: input.recencySatisfied,
+    sourceGrounded: input.sourceGrounded,
+    readinessReady: input.readinessReady,
+  });
+}
+
+async function runHighImpactAutopromoteSuite(options: RunEvalOptions): Promise<EvalCaseSummary[]> {
+  const evaluate = options.highImpactAutopromoteEvaluator ?? defaultHighImpactAutopromoteEvaluator;
+  return HIGH_IMPACT_AUTOPROMOTE_CASES.map(item => {
+    const allowed = evaluate(item);
+    const blockers = highImpactBlockers(item);
+    const missing: string[] = [];
+    const forbidden: string[] = [];
+    if (item.expectedAllowed && !allowed) missing.push('expected Tier-2 auto-promotion was blocked');
+    if (!item.expectedAllowed && allowed) forbidden.push('high-impact Tier-2 auto-promotion allowed');
+    for (const blocker of item.expectedBlockers) {
+      if (!blockers.includes(blocker)) missing.push(`blocker ${blocker}`);
+    }
+    return caseResult({
+      id: item.id,
+      suite: 'high_impact_autopromote',
+      title: item.title,
+      missing,
+      forbidden,
+      expected: {
+        auto_promote_allowed: item.expectedAllowed,
+        required_blockers: item.expectedBlockers,
+      },
+      observed: {
+        auto_promote_allowed: allowed,
+        context_type: item.contextType,
+        claim_tier: memoryClaimTier(item.contextType),
+        tier2_autopromote_policy: item.tier2AutopromotePolicy,
+        confidence: item.confidence,
+        threshold: item.threshold,
+        evidence_count: item.evidenceCount,
+        independent_source_count: item.independentSourceCount,
+        duplicate_source_count: Math.max(0, item.evidenceCount - item.independentSourceCount),
+        recency_satisfied: item.recencySatisfied,
+        source_grounded: item.sourceGrounded,
+        readiness_ready: item.readinessReady,
+        decision_blockers: blockers,
+      },
+      scores: {
+        high_impact_autopromote_false_allow: !item.expectedAllowed && allowed ? 1 : 0,
+        high_impact_autopromote_decision_accuracy: scoreBoolean(allowed === item.expectedAllowed),
+      },
+    });
+  });
+}
+
 async function runActionContextSuite(): Promise<EvalCaseSummary[]> {
   const db = new SeededActiveContextDb();
   try {
@@ -2122,6 +2341,7 @@ async function caseCountForSuite(name: EvalSuiteName): Promise<number> {
   if (name === 'raw_context_custom_registry') return (await loadFixture('raw-context-custom-registry-corpus.json')).length;
   if (name === 'record_resolution') return (await loadFixture('record-resolution-golden-corpus.json')).length;
   if (name === 'retrieval_quality') return 1;
+  if (name === 'high_impact_autopromote') return HIGH_IMPACT_AUTOPROMOTE_CASES.length;
   if (name === 'action_context') return 1;
   if (name === 'source_attribution') return 1;
   if (name === 'connector_certification') return 2;
@@ -2196,6 +2416,8 @@ async function runSuite(suite: EvalSuiteName, options: RunEvalOptions): Promise<
       return runRecordResolutionSuite(options);
     case 'retrieval_quality':
       return runRetrievalQualitySuite();
+    case 'high_impact_autopromote':
+      return runHighImpactAutopromoteSuite(options);
     case 'action_context':
       return runActionContextSuite();
     case 'source_attribution':
@@ -2270,8 +2492,8 @@ export async function runCrmyEval(options: RunEvalOptions = {}): Promise<EvalRun
   const supported = selected.filter(suite => IMPLEMENTED_SUITES.includes(suite));
   const planned = selected.filter(suite => !IMPLEMENTED_SUITES.includes(suite));
 
-  // Planned-but-unimplemented suites (e.g. connector_certification) are reported
-  // as skipped rather than throwing, so `eval run --all` always produces a
+  // Planned-but-unimplemented suites are reported as skipped rather than
+  // throwing, so `eval run --all` always produces a
   // complete, auditable report instead of failing the whole run.
   const ranResults = (await Promise.all(supported.map(suite => runSuite(suite, runOptions)))).flat();
   const plannedResults = planned.map(suite => skippedCase({

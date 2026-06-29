@@ -138,6 +138,26 @@ function ValidUntilBadge({ date }: { date: string | null | undefined }) {
   );
 }
 
+function contextEntryMatchesQuery(entry: any, rawQuery: string) {
+  const needle = rawQuery.trim().toLowerCase();
+  if (!needle) return true;
+  const haystack = [
+    entry.title,
+    entry.body,
+    entry.subject_name,
+    entry.subject_type,
+    entry.context_type,
+    entry.source_label,
+    entry.source_ref,
+    entry.source_type,
+    ...(Array.isArray(entry.tags) ? entry.tags : []),
+  ]
+    .filter(Boolean)
+    .map(value => String(value).toLowerCase())
+    .join(' ');
+  return haystack.includes(needle);
+}
+
 function subjectTypeLabel(t: string) {
   return t === 'use_case' ? 'Use Case' : t.charAt(0).toUpperCase() + t.slice(1);
 }
@@ -898,6 +918,7 @@ export function ContextBrowser({
     () => staleOnly ? staleEntries : infiniteData?.pages.flatMap((p: any) => p.data ?? []) ?? [],
     [infiniteData, staleOnly, staleEntries],
   );
+  const recentKeywordEntriesRef = useRef<any[]>([]);
   const total: number = staleOnly ? staleEntries.length : infiniteData?.pages[0]?.total ?? 0;
 
   const semanticParams = useMemo(() => ({
@@ -917,15 +938,27 @@ export function ContextBrowser({
   const showSemanticFallbackNote = semanticUnavailable && q.trim().length >= 2;
   const semanticUnavailableMessage = (semanticData as any)?.error
     ? String((semanticData as any).error)
-    : 'Semantic retrieval is not ready on this workspace.';
+    : 'Semantic search is not ready on this workspace.';
   const currentUser = getUser();
   const canOpenDatabaseSettings = currentUser?.role === 'admin' || currentUser?.role === 'owner';
+
+  useEffect(() => {
+    if (!staleOnly && searchMode === 'keyword' && !q.trim() && entries.length > 0) {
+      recentKeywordEntriesRef.current = entries;
+    }
+  }, [entries, q, searchMode, staleOnly]);
 
   // When semantic search errors, fall back to keyword results
   const effectiveMode = searchMode === 'semantic' && semanticUnavailable ? 'keyword' : searchMode;
 
   const filtered = useMemo(() => {
     let items = staleOnly ? entries : effectiveMode === 'semantic' ? semanticEntries : entries;
+    const keywordQuery = q.trim();
+    if (!staleOnly && effectiveMode === 'keyword' && keywordQuery) {
+      const localBase = entries.length > 0 ? entries : recentKeywordEntriesRef.current;
+      const localMatches = localBase.filter(entry => contextEntryMatchesQuery(entry, keywordQuery));
+      if (items.length === 0 && localMatches.length > 0) items = localMatches;
+    }
 
     if (sort) {
       items = [...items].sort((a: any, b: any) => {
@@ -944,6 +977,9 @@ export function ContextBrowser({
     ? isLoading
     : (semanticUnavailable ? isLoading : semanticLoading);
   const hasFilters  = Object.keys(activeFilters).length > 0 || q;
+  const displayedTotal = q.trim() && effectiveMode === 'keyword' && total === 0 && filtered.length > 0
+    ? filtered.length
+    : total;
 
   const handleIngest = useCallback(async () => {
     const activeText = ingestTab === 'file' ? uploadText : ingestText;
@@ -1247,10 +1283,10 @@ export function ContextBrowser({
           >
             <Search className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-500" />
             <span>
-              Showing keyword matches for this search because semantic retrieval is not ready.{' '}
+              Showing keyword matches for this search because semantic search is not ready.{' '}
               {canOpenDatabaseSettings
                 ? 'Open Database Settings to enable pgvector and an embedding provider.'
-                : 'Ask an admin to enable semantic retrieval in Database Settings.'}
+                : 'Ask an admin to enable semantic search in Database Settings.'}
               <span className="sr-only"> {semanticUnavailableMessage}</span>
             </span>
           </motion.div>
@@ -1294,8 +1330,8 @@ export function ContextBrowser({
           <p className="mb-3 text-xs text-muted-foreground">
             {effectiveMode === 'semantic'
               ? `Showing ${filtered.length.toLocaleString()} top semantic matches.`
-              : `Showing ${filtered.length.toLocaleString()} of ${total.toLocaleString()} ${q.trim() ? 'matching ' : ''}${memoryStatus === 'signal' ? 'Signals' : 'Memory entries'}.`}
-            {' '}Use search, record, type, and semantic retrieval to narrow large workspaces.
+              : `Showing ${filtered.length.toLocaleString()} of ${displayedTotal.toLocaleString()} ${q.trim() ? 'matching ' : ''}${memoryStatus === 'signal' ? 'Signals' : 'Memory entries'}.`}
+            {' '}Use search, record, type, and semantic search to narrow large workspaces.
           </p>
           <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
             <div className="overflow-x-auto">
@@ -1366,8 +1402,8 @@ export function ContextBrowser({
             <p className="mb-3 text-xs text-muted-foreground">
               {effectiveMode === 'semantic'
                 ? `Showing ${filtered.length.toLocaleString()} top semantic matches.`
-                : `Showing ${filtered.length.toLocaleString()} of ${total.toLocaleString()} ${q.trim() ? 'matching ' : ''}${memoryStatus === 'signal' ? 'Signals' : 'Memory entries'}.`}
-              {' '}Use search, record, type, and semantic retrieval to narrow large workspaces.
+                : `Showing ${filtered.length.toLocaleString()} of ${displayedTotal.toLocaleString()} ${q.trim() ? 'matching ' : ''}${memoryStatus === 'signal' ? 'Signals' : 'Memory entries'}.`}
+              {' '}Use search, record, type, and semantic search to narrow large workspaces.
             </p>
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               {filtered.map((entry: any, i: number) => {
@@ -1426,54 +1462,14 @@ export function ContextBrowser({
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
-                      <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          {entry.tags?.length > 0 && (
-                            <span className="inline-flex items-center gap-1">
-                              <Tag className="h-3 w-3" />
-                              {entry.tags.slice(0, 3).join(', ')}
-                              {entry.tags.length > 3 && ` +${entry.tags.length - 3}`}
-                            </span>
-                          )}
-                          <span className="inline-flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
-                          </span>
-                          <ValidUntilBadge date={entry.valid_until} />
-                      </div>
-                      <div className="ml-auto flex flex-wrap justify-end gap-2">
-                        {expired && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 text-xs text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
-                            onClick={() => reviewEntry.mutate(entry.id)}
-                            disabled={reviewEntry.isPending}
-                          >
-                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                            Mark reviewed
-                          </Button>
-                        )}
-                        {isSignal && (
-                          <Button
-                            size="sm"
-                            className="h-7 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
-                            onClick={() => promoteSignal.mutate(
-                              { id: entry.id },
-                              { onSuccess: () => toast({ title: 'Promoted to Memory', description: 'Agents can now use this as confirmed operational context.' }) },
-                            )}
-                            disabled={promoteSignal.isPending}
-                          >
-                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                            Confirm Signal
-                          </Button>
-                        )}
+                      <div className="flex justify-start">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground" aria-label="Entry actions">
                               <MoreHorizontal className="h-3.5 w-3.5" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuContent align="start" className="w-44">
                             <DropdownMenuItem onClick={() => openEntryDrawer(entry)}>
                               <Eye className="mr-2 h-3.5 w-3.5" />
                               Details
@@ -1517,6 +1513,48 @@ export function ContextBrowser({
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
+                      </div>
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          {entry.tags?.length > 0 && (
+                            <span className="inline-flex items-center gap-1">
+                              <Tag className="h-3 w-3" />
+                              {entry.tags.slice(0, 3).join(', ')}
+                              {entry.tags.length > 3 && ` +${entry.tags.length - 3}`}
+                            </span>
+                          )}
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
+                          </span>
+                          <ValidUntilBadge date={entry.valid_until} />
+                      </div>
+                      <div className="ml-auto flex flex-wrap justify-end gap-2">
+                        {expired && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+                            onClick={() => reviewEntry.mutate(entry.id)}
+                            disabled={reviewEntry.isPending}
+                          >
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                            Mark reviewed
+                          </Button>
+                        )}
+                        {isSignal && (
+                          <Button
+                            size="sm"
+                            className="h-7 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+                            onClick={() => promoteSignal.mutate(
+                              { id: entry.id },
+                              { onSuccess: () => toast({ title: 'Promoted to Memory', description: 'Agents can now use this as confirmed operational context.' }) },
+                            )}
+                            disabled={promoteSignal.isPending}
+                          >
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                            Confirm Signal
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </motion.article>

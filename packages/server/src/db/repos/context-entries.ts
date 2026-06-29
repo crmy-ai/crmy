@@ -759,13 +759,55 @@ export async function searchContextEntries(
     params.push(JSON.stringify([filters.tag]));
     idx++;
   }
-  if (filters.query) {
+  if (filters.query?.trim()) {
+    const textQuery = filters.query.trim();
+    const likeQuery = `%${textQuery}%`;
     conditions.push(`(
       c.search_vector @@ plainto_tsquery('english', $${idx})
       OR c.title ILIKE $${idx + 1}
       OR c.body ILIKE $${idx + 1}
+      OR c.context_type ILIKE $${idx + 1}
+      OR c.source_label ILIKE $${idx + 1}
+      OR c.source_ref ILIKE $${idx + 1}
+      OR c.source_type ILIKE $${idx + 1}
+      OR c.tags::text ILIKE $${idx + 1}
+      OR EXISTS (
+        SELECT 1 FROM contacts ct
+        WHERE ct.tenant_id = c.tenant_id
+          AND c.subject_type = 'contact'
+          AND ct.id = c.subject_id
+          AND ct.archived_at IS NULL
+          AND (
+            COALESCE(ct.first_name, '') || ' ' || COALESCE(ct.last_name, '') ILIKE $${idx + 1}
+            OR ct.email ILIKE $${idx + 1}
+          )
+      )
+      OR EXISTS (
+        SELECT 1 FROM accounts a
+        WHERE a.tenant_id = c.tenant_id
+          AND c.subject_type = 'account'
+          AND a.id = c.subject_id
+          AND a.archived_at IS NULL
+          AND a.name ILIKE $${idx + 1}
+      )
+      OR EXISTS (
+        SELECT 1 FROM opportunities o
+        WHERE o.tenant_id = c.tenant_id
+          AND c.subject_type = 'opportunity'
+          AND o.id = c.subject_id
+          AND o.archived_at IS NULL
+          AND o.name ILIKE $${idx + 1}
+      )
+      OR EXISTS (
+        SELECT 1 FROM use_cases uc
+        WHERE uc.tenant_id = c.tenant_id
+          AND c.subject_type = 'use_case'
+          AND uc.id = c.subject_id
+          AND uc.archived_at IS NULL
+          AND COALESCE(uc.name, uc.title) ILIKE $${idx + 1}
+      )
     )`);
-    params.push(filters.query, `%${filters.query}%`);
+    params.push(textQuery, likeQuery);
     idx += 2;
   }
   if (filters.structured_data_filter) {

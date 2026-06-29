@@ -60,7 +60,7 @@ closing this gap. 0.9.5 makes the safe path the automatic path.
 4. **Good defaults, tunable power.** Tiers, freshness windows, and promotion
    policy ship with strong defaults and are tenant-configurable for advanced use.
 5. **Prove it with evals, not vibes.** Every new automatic path has an eval gate;
-   high-risk false-allow stays at 0.
+   high-risk and high-impact auto-promote false-allow stay at 0.
 
 ## Gaps this release closes
 
@@ -126,8 +126,9 @@ certify a model; auto-promote is therefore permanently off in production.
 
 **Acceptance:** fresh `init --demo` with the recommended model auto-confirms
 Tier-0/1 grounded Memory with no manual steps; Tier-2 routes per policy; eval
-`action_context` high-risk false-allow rate = 0; `crmy certify` flips a passing
-model to `certified` and auto-promotion turns on.
+`action_context` high-risk false-allow rate = 0; eval
+`high_impact_autopromote_false_allow = 0`; `crmy certify` flips a passing model
+to `certified` and auto-promotion turns on.
 
 ---
 
@@ -416,7 +417,7 @@ No web UI step is required to reach an agent-ready, governed briefing.
 | Gate | Target |
 |---|---|
 | Action Context high-risk false-allow | 0 |
-| Tier-2 unsafe auto-promote (forecast/commitment/etc. without policy) | 0 |
+| Tier-2 high-impact auto-promote false-allow | 0 |
 | Source-attribution unsupported-claim rate (drafts) | 0 |
 | Auto-promotion recall for grounded Tier-0/1 with recommended model | ≥ 0.85 |
 | Golden-path required manual UI actions | 0 |

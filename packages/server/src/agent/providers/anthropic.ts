@@ -9,7 +9,7 @@ const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? DE
 // ── Thinking support ──────────────────────────────────────────────────────────
 
 /** Models that support extended thinking + interleaved reasoning between tool calls. */
-const THINKING_MODELS = ['claude-3-7', 'claude-opus-4', 'claude-sonnet-4'];
+const THINKING_MODELS = ['claude-3-7', 'claude-fable-5', 'claude-opus-4', 'claude-sonnet-4'];
 
 function supportsThinking(model: string): boolean {
   return THINKING_MODELS.some(prefix => model.includes(prefix));

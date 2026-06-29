@@ -104,6 +104,7 @@ export const evalSuiteName = z.enum([
   'raw_context_custom_registry',
   'record_resolution',
   'retrieval_quality',
+  'high_impact_autopromote',
   'tool_choice',
   'action_context',
   'source_attribution',

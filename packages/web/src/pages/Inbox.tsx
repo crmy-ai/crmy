@@ -3,6 +3,7 @@
 
 import { useState, useMemo, useEffect, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -23,11 +24,13 @@ import {
   useResolveHITL,
   useUpdateHITL,
   useAssignments,
+  useAssignmentReviewQueue,
   useActors,
   useWhoAmI,
   useAcceptAssignment,
   useStartAssignment,
   useCompleteAssignment,
+  useResolveReviewAssignment,
   useDeclineAssignment,
   useBlockAssignment,
   useCancelAssignment,
@@ -64,10 +67,17 @@ import {
   UserCheck,
   Check,
   ChevronsUpDown,
+  MoreHorizontal,
 } from 'lucide-react';
 import { formatDistanceToNow, isPast, parseISO } from 'date-fns';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
-type Tab = 'needs_attention' | 'delegated' | 'all';
+type Tab = 'needs_attention' | 'review_queue' | 'delegated' | 'all';
 type ViewMode = 'card' | 'table';
 
 interface HITLRequest {
@@ -102,6 +112,7 @@ interface Assignment {
   assigned_to: string;
   assigned_by: string;
   context?: string;
+  metadata?: Record<string, unknown>;
   created_at: string;
   due_at?: string;
 }
@@ -131,6 +142,7 @@ const ACTIVE_STATUSES = ['pending', 'accepted', 'in_progress', 'blocked'];
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'needs_attention', label: 'Needs Attention' },
+  { key: 'review_queue',    label: 'Review Queue' },
   { key: 'delegated',       label: 'Delegated' },
   { key: 'all',             label: 'All' },
 ];
@@ -162,6 +174,11 @@ const FILTER_CONFIGS: FilterConfig[] = [
     { value: 'follow_up', label: 'Follow Up' },
     { value: 'research', label: 'Research' },
     { value: 'review', label: 'Review' },
+    { value: 'stale_context_review', label: 'Memory Review' },
+    { value: 'freshness_context_review', label: 'Freshness Review' },
+    { value: 'signal_review', label: 'Signal Review' },
+    { value: 'contradiction_review', label: 'Contradiction Review' },
+    { value: 'knowledge_claim_review', label: 'Knowledge Review' },
     { value: 'send', label: 'Send' },
   ]},
 ];
@@ -220,6 +237,54 @@ function firstNumber(record: Record<string, unknown>, keys: string[]): number | 
 
 function labelize(value: string) {
   return value.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+const REVIEW_ASSIGNMENT_TYPES = new Set([
+  'stale_context_review',
+  'freshness_context_review',
+  'signal_review',
+  'contradiction_review',
+  'knowledge_claim_review',
+]);
+
+function isReviewAssignment(task: Assignment) {
+  return REVIEW_ASSIGNMENT_TYPES.has(task.assignment_type) || Boolean(task.metadata?.review_key);
+}
+
+function assignmentTypeLabel(type: string) {
+  switch (type) {
+    case 'stale_context_review': return 'Memory Review';
+    case 'freshness_context_review': return 'Freshness Review';
+    case 'signal_review': return 'Signal Review';
+    case 'contradiction_review': return 'Conflict Review';
+    case 'knowledge_claim_review': return 'Knowledge Review';
+    default: return labelize(type);
+  }
+}
+
+function reviewTier(task: Assignment): number | null {
+  const value = task.metadata?.memory_claim_tier;
+  if (typeof value === 'number' && [0, 1, 2].includes(value)) return value;
+  if (typeof value === 'string' && ['0', '1', '2'].includes(value)) return Number(value);
+  return null;
+}
+
+function reviewTypeDetail(task: Assignment) {
+  const metadata = task.metadata ?? {};
+  const parts = [
+    typeof metadata.context_type === 'string' ? labelize(metadata.context_type) : null,
+    reviewTier(task) !== null ? `Tier ${reviewTier(task)}` : null,
+    Array.isArray(metadata.review_context_entry_ids) && metadata.review_context_entry_ids.length > 1
+      ? `${metadata.review_context_entry_ids.length} linked Memory`
+      : null,
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+function canResolveLowRiskReview(task: Assignment) {
+  if (!['pending', 'accepted', 'in_progress', 'blocked'].includes(task.status)) return false;
+  if (!['stale_context_review', 'freshness_context_review', 'signal_review'].includes(task.assignment_type)) return false;
+  return reviewTier(task) !== 2;
 }
 
 function errorMessage(err: unknown, fallback: string) {
@@ -428,6 +493,50 @@ function DecisionPacket({ req, compact = false }: { req: HITLRequest; compact?: 
   const visibleEvidence = fields.evidence.slice(0, compact ? 2 : 4);
   const visibleBlockers = fields.blockers.slice(0, compact ? 1 : 3);
 
+  if (compact) {
+    const hasCompactContent = !!fields.proposedChange || visibleEvidence.length > 0 || visibleBlockers.length > 0 || highlights.length > 0;
+    if (!hasCompactContent) return null;
+    return (
+      <div className="rounded-xl border border-border bg-muted/15 p-3 space-y-3">
+        {highlights.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 text-xs">
+            {highlights.slice(0, 3).map(([label, value]) => (
+              <span key={label} className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/70 bg-card/70 px-2 py-0.5 text-muted-foreground">
+                <span className="font-medium">{label}</span>
+                <span className="truncate text-foreground">{String(value)}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {fields.proposedChange && (
+          <div className="text-xs">
+            <p className="font-medium text-muted-foreground">Proposed change</p>
+            <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-foreground">{fields.proposedChange}</p>
+          </div>
+        )}
+
+        {visibleEvidence.length > 0 && (
+          <div className="text-xs">
+            <p className="font-medium text-muted-foreground">Evidence</p>
+            <ul className="mt-1 space-y-1">
+              {visibleEvidence.map((item, index) => <li key={index} className="line-clamp-2 text-foreground">- {item}</li>)}
+            </ul>
+          </div>
+        )}
+
+        {visibleBlockers.length > 0 && (
+          <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-xs">
+            <p className="font-medium text-amber-600">Needs review because</p>
+            <ul className="mt-1 space-y-1 text-foreground">
+              {visibleBlockers.map((item, index) => <li key={index} className="line-clamp-2">- {item}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl border border-border bg-muted/15 p-3 space-y-3">
       <div className="flex items-start justify-between gap-3">
@@ -619,7 +728,6 @@ function HITLCard({ req, onOpenDetails }: { req: HITLRequest; onOpenDetails: () 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-600">{isPending ? 'Decision required' : 'Decision complete'}</span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-mono">{req.action_type}</span>
             <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[req.status] ?? STATUS_COLORS.pending}`}>{req.status.replace('_', ' ')}</span>
             {req.priority && <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLORS[req.priority] ?? PRIORITY_COLORS.normal}`}>{req.priority}</span>}
             {req.escalated_at && <span className="text-xs flex items-center gap-1 text-destructive"><AlertTriangle className="w-3 h-3" />Escalated</span>}
@@ -629,17 +737,7 @@ function HITLCard({ req, onOpenDetails }: { req: HITLRequest; onOpenDetails: () 
               </span>
             )}
           </div>
-          <div className="flex items-start justify-between gap-3">
-            <p className="text-sm font-medium text-foreground">{req.action_summary}</p>
-            <button
-              type="button"
-              onClick={onOpenDetails}
-              className="h-7 px-2 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors flex items-center gap-1"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              Details
-            </button>
-          </div>
+          <p className="text-sm font-medium text-foreground">{req.action_summary}</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {subject.label ?? 'No linked record'} · {timeAgo(req.created_at)}
           </p>
@@ -654,15 +752,65 @@ function HITLCard({ req, onOpenDetails }: { req: HITLRequest; onOpenDetails: () 
           {autoApprove && <span className="px-2 py-1 rounded-lg bg-muted/50">Auto approval {autoApprove.label.toLowerCase()}</span>}
         </div>
       )}
-      <div className="border-t border-border p-3 flex justify-end gap-2 bg-surface-sunken/30">
-        <ActionBtn label="Details" icon={<Eye className="w-3.5 h-3.5" />} onClick={onOpenDetails} loading={false} color="ghost" />
-        {isPending && <HITLDecisionActions req={req} />}
+      <div className="border-t border-border bg-surface-sunken/30 p-3 flex items-center justify-between gap-2">
+        <HITLCardMoreMenu req={req} onOpenDetails={onOpenDetails} />
+        <div className="ml-auto flex justify-end gap-2">
+          {isPending && <HITLDecisionActions req={req} primaryOnly />}
+        </div>
       </div>
     </div>
   );
 }
 
-function HITLDecisionActions({ req, note }: { req: HITLRequest; note?: string }) {
+function HITLCardMoreMenu({ req, onOpenDetails }: { req: HITLRequest; onOpenDetails: () => void }) {
+  const resolve = useResolveHITL();
+  const [acting, setActing] = useState(false);
+  const isPending = req.status === 'pending';
+
+  async function reject() {
+    setActing(true);
+    try {
+      await resolve.mutateAsync({ id: req.id, decision: 'rejected' });
+      toast({ title: 'Rejected', description: req.action_summary });
+    } catch (err) {
+      toast({ title: 'Could not resolve handoff', description: errorMessage(err, 'Check access and try again.'), variant: 'destructive' });
+    } finally {
+      setActing(false);
+    }
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          aria-label="Handoff actions"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-44">
+        <DropdownMenuItem onClick={onOpenDetails}>
+          <Eye className="mr-2 h-3.5 w-3.5" />
+          Details
+        </DropdownMenuItem>
+        {isPending && (
+          <DropdownMenuItem
+            onClick={reject}
+            disabled={acting}
+            className="text-destructive focus:text-destructive"
+          >
+            {acting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <XCircle className="mr-2 h-3.5 w-3.5" />}
+            Reject
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function HITLDecisionActions({ req, note, primaryOnly = false }: { req: HITLRequest; note?: string; primaryOnly?: boolean }) {
   const resolve = useResolveHITL();
   const [acting, setActing] = useState<'approve' | 'reject' | null>(null);
   if (req.status !== 'pending') return null;
@@ -681,7 +829,7 @@ function HITLDecisionActions({ req, note }: { req: HITLRequest; note?: string })
 
   return (
     <>
-      <ActionBtn label="Reject" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => handle('rejected')} loading={acting === 'reject'} color="destructive" />
+      {!primaryOnly && <ActionBtn label="Reject" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => handle('rejected')} loading={acting === 'reject'} color="destructive" />}
       <ActionBtn label="Approve" icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={() => handle('approved')} loading={acting === 'approve'} color="success" />
     </>
   );
@@ -976,44 +1124,24 @@ function HITLDetailDrawer({
 
 // ─── Assignment Card ──────────────────────────────────────────────────────────
 
-function AssignmentCard({ task, actorMap }: { task: Assignment; actorMap: Map<string, string> }) {
-  const accept   = useAcceptAssignment();
-  const start    = useStartAssignment();
-  const complete = useCompleteAssignment();
-  const decline  = useDeclineAssignment();
-  const block    = useBlockAssignment();
-  const cancel   = useCancelAssignment();
-  const [acting, setActing] = useState<string | null>(null);
-
-  async function act(action: string) {
-    setActing(action);
-    try {
-      if (action === 'accept')        await accept.mutateAsync(task.id);
-      else if (action === 'start')    await start.mutateAsync(task.id);
-      else if (action === 'complete') await complete.mutateAsync({ id: task.id });
-      else if (action === 'decline')  await decline.mutateAsync({ id: task.id });
-      else if (action === 'block')    await block.mutateAsync({ id: task.id });
-      else if (action === 'cancel')   await cancel.mutateAsync({ id: task.id });
-      toast({ title: `Assignment ${action}ed` });
-    } catch {
-      toast({ title: 'Error', description: `Could not ${action} assignment.`, variant: 'destructive' });
-    } finally { setActing(null); }
-  }
-
+function AssignmentCard({ task, actorMap, onOpenDetails }: { task: Assignment; actorMap: Map<string, string>; onOpenDetails: () => void }) {
   const isOverdue = task.due_at && isPast(parseISO(task.due_at)) && !['completed', 'cancelled', 'declined'].includes(task.status);
   const assignedByName = actorMap.get(task.assigned_by) ?? task.assigned_by.slice(0, 8) + '…';
+  const reviewDetail = reviewTypeDetail(task);
+  const reviewTask = isReviewAssignment(task);
 
   return (
     <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
       <div className="flex items-start gap-3 p-4">
-        <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-          <User className="w-4 h-4 text-primary" />
+        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${reviewTask ? 'bg-amber-500/10' : 'bg-primary/10'}`}>
+          {reviewTask ? <ShieldCheck className="w-4 h-4 text-amber-600" /> : <User className="w-4 h-4 text-primary" />}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLORS[task.priority] ?? PRIORITY_COLORS.normal}`}>{task.priority}</span>
             <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[task.status] ?? 'bg-muted text-muted-foreground'}`}>{task.status.replace('_', ' ')}</span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-mono">{task.assignment_type.replace('_', ' ')}</span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{assignmentTypeLabel(task.assignment_type)}</span>
+            {reviewTier(task) === 2 && <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/15 text-destructive">Tier 2</span>}
             {isOverdue && <span className="text-xs flex items-center gap-1 text-destructive"><AlertTriangle className="w-3 h-3" />Overdue</span>}
           </div>
           <p className="text-sm font-medium text-foreground leading-snug">{task.title}</p>
@@ -1027,29 +1155,162 @@ function AssignmentCard({ task, actorMap }: { task: Assignment; actorMap: Map<st
               </span>
             )}
           </div>
+          {reviewDetail && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{reviewDetail}</p>}
           {task.context && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{task.context}</p>}
         </div>
       </div>
-      {ACTIVE_STATUSES.includes(task.status) && (
-        <div className="border-t border-border px-3 py-2 flex gap-2 flex-wrap bg-surface-sunken/30">
-          {task.status === 'pending' && <>
-            <ActionBtn label="Accept" icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={() => act('accept')} loading={acting === 'accept'} color="success" />
-            <ActionBtn label="Decline" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => act('decline')} loading={acting === 'decline'} color="destructive" />
-          </>}
-          {task.status === 'accepted' && <>
-            <ActionBtn label="Start" icon={<Play className="w-3.5 h-3.5" />} onClick={() => act('start')} loading={acting === 'start'} color="primary" />
-            <ActionBtn label="Decline" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => act('decline')} loading={acting === 'decline'} color="ghost" />
-          </>}
-          {task.status === 'in_progress' && <>
-            <ActionBtn label="Complete" icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={() => act('complete')} loading={acting === 'complete'} color="success" />
-            <ActionBtn label="Block" icon={<Ban className="w-3.5 h-3.5" />} onClick={() => act('block')} loading={acting === 'block'} color="warning" />
-          </>}
-          {task.status === 'blocked' && <>
-            <ActionBtn label="Resume" icon={<Play className="w-3.5 h-3.5" />} onClick={() => act('start')} loading={acting === 'start'} color="primary" />
-            <ActionBtn label="Cancel" icon={<AlertOctagon className="w-3.5 h-3.5" />} onClick={() => act('cancel')} loading={acting === 'cancel'} color="ghost" />
-          </>}
-        </div>
+      {hasAssignmentActions(task) && (
+        <AssignmentActionControls task={task} onOpenDetails={onOpenDetails} className="border-t border-border bg-surface-sunken/30 p-3" />
       )}
+    </div>
+  );
+}
+
+type AssignmentActionName = 'accept' | 'start' | 'complete' | 'decline' | 'block' | 'cancel' | 'resolve_review';
+
+const ASSIGNMENT_ACTION_LABELS: Record<AssignmentActionName, string> = {
+  accept: 'Accept',
+  start: 'Start',
+  complete: 'Complete',
+  decline: 'Decline',
+  block: 'Block',
+  cancel: 'Cancel',
+  resolve_review: 'Mark reviewed',
+};
+
+const ASSIGNMENT_ACTION_TOASTS: Record<AssignmentActionName, string> = {
+  accept: 'accepted',
+  start: 'started',
+  complete: 'completed',
+  decline: 'declined',
+  block: 'blocked',
+  cancel: 'cancelled',
+  resolve_review: 'reviewed',
+};
+
+function hasAssignmentActions(task: Assignment) {
+  return ACTIVE_STATUSES.includes(task.status) || isReviewAssignment(task);
+}
+
+function assignmentActionIcon(action: AssignmentActionName, className = 'w-3.5 h-3.5') {
+  if (action === 'accept' || action === 'complete') return <CheckCircle2 className={className} />;
+  if (action === 'decline') return <XCircle className={className} />;
+  if (action === 'start') return <Play className={className} />;
+  if (action === 'block') return <Ban className={className} />;
+  if (action === 'cancel') return <AlertOctagon className={className} />;
+  return <ShieldCheck className={className} />;
+}
+
+function assignmentActionColor(action: AssignmentActionName) {
+  if (action === 'accept' || action === 'complete' || action === 'resolve_review') return 'success';
+  if (action === 'start') return 'primary';
+  if (action === 'block') return 'warning';
+  if (action === 'decline') return 'destructive';
+  return 'ghost';
+}
+
+function AssignmentActionControls({ task, onOpenDetails, className }: { task: Assignment; onOpenDetails: () => void; className?: string }) {
+  const accept   = useAcceptAssignment();
+  const start    = useStartAssignment();
+  const complete = useCompleteAssignment();
+  const resolveReview = useResolveReviewAssignment();
+  const decline  = useDeclineAssignment();
+  const block    = useBlockAssignment();
+  const cancel   = useCancelAssignment();
+  const [acting, setActing] = useState<AssignmentActionName | null>(null);
+  const reviewResolveAllowed = canResolveLowRiskReview(task);
+
+  async function act(action: AssignmentActionName) {
+    setActing(action);
+    try {
+      if (action === 'accept')        await accept.mutateAsync(task.id);
+      else if (action === 'start')    await start.mutateAsync(task.id);
+      else if (action === 'complete') await complete.mutateAsync({ id: task.id });
+      else if (action === 'decline')  await decline.mutateAsync({ id: task.id });
+      else if (action === 'block')    await block.mutateAsync({ id: task.id });
+      else if (action === 'cancel')   await cancel.mutateAsync({ id: task.id });
+      else if (action === 'resolve_review') await resolveReview.mutateAsync({ id: task.id });
+
+      if (action === 'resolve_review') {
+        toast({ title: 'Review resolved', description: 'Linked Memory was marked reviewed and the assignment was completed.' });
+      } else {
+        toast({ title: `Assignment ${ASSIGNMENT_ACTION_TOASTS[action]}` });
+      }
+    } catch (err) {
+      if (action === 'resolve_review') {
+        toast({ title: 'Review still needs attention', description: errorMessage(err, 'Open the assignment details for the next step.'), variant: 'destructive' });
+      } else {
+        toast({ title: 'Error', description: `Could not ${ASSIGNMENT_ACTION_LABELS[action].toLowerCase()} assignment.`, variant: 'destructive' });
+      }
+    } finally {
+      setActing(null);
+    }
+  }
+
+  const primaryAction: AssignmentActionName | null = reviewResolveAllowed
+    ? 'resolve_review'
+    : task.status === 'pending'
+      ? 'accept'
+      : task.status === 'accepted'
+        ? 'start'
+        : task.status === 'in_progress'
+          ? 'complete'
+          : task.status === 'blocked'
+            ? 'start'
+            : null;
+
+  const secondaryActions: AssignmentActionName[] = [];
+  if (task.status === 'pending') secondaryActions.push('decline');
+  if (task.status === 'accepted') secondaryActions.push('decline');
+  if (task.status === 'in_progress') secondaryActions.push('block');
+  if (task.status === 'blocked') secondaryActions.push('cancel');
+  const primaryLabel = primaryAction === 'start' && task.status === 'blocked'
+    ? 'Resume'
+    : primaryAction
+      ? ASSIGNMENT_ACTION_LABELS[primaryAction]
+      : '';
+
+  return (
+    <div className={cn('flex items-center justify-between gap-2', className)}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            aria-label="Assignment actions"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-44">
+          <DropdownMenuItem onClick={onOpenDetails}>
+            <Eye className="mr-2 h-3.5 w-3.5" />
+            Details
+          </DropdownMenuItem>
+          {secondaryActions.map(action => (
+            <DropdownMenuItem
+              key={action}
+              onClick={() => act(action)}
+              disabled={acting !== null}
+              className={action === 'decline' ? 'text-destructive focus:text-destructive' : undefined}
+            >
+              {acting === action ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : assignmentActionIcon(action, 'mr-2 h-3.5 w-3.5')}
+              {ASSIGNMENT_ACTION_LABELS[action]}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <div className="ml-auto flex justify-end gap-2">
+        {primaryAction && (
+          <ActionBtn
+            label={primaryLabel}
+            icon={assignmentActionIcon(primaryAction)}
+            onClick={() => act(primaryAction)}
+            loading={acting === primaryAction}
+            color={assignmentActionColor(primaryAction)}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -1095,42 +1356,22 @@ function HITLTableRow({ req, index, actorMap, onOpenDetails }: { req: HITLReques
       <td className="px-4 py-3 text-xs text-muted-foreground">{reviewer}</td>
       <td className="px-4 py-3 text-xs text-muted-foreground">{slaLabel(req.sla_minutes)}</td>
       <td className="px-4 py-3">
-        <div className="flex gap-1.5">
-          <ActionBtn label="Details" icon={<Eye className="w-3 h-3" />} onClick={onOpenDetails} loading={false} color="ghost" />
-          {isPending && <HITLDecisionActions req={req} />}
+        <div className="flex items-center justify-between gap-2">
+          <HITLCardMoreMenu req={req} onOpenDetails={onOpenDetails} />
+          <div className="ml-auto flex justify-end gap-2">
+            {isPending && <HITLDecisionActions req={req} primaryOnly />}
+          </div>
         </div>
       </td>
     </tr>
   );
 }
 
-function AssignmentTableRow({ task, actorMap, index }: { task: Assignment; actorMap: Map<string, string>; index: number }) {
-  const accept   = useAcceptAssignment();
-  const start    = useStartAssignment();
-  const complete = useCompleteAssignment();
-  const decline  = useDeclineAssignment();
-  const block    = useBlockAssignment();
-  const cancel   = useCancelAssignment();
-  const [acting, setActing] = useState<string | null>(null);
-
-  async function act(action: string) {
-    setActing(action);
-    try {
-      if (action === 'accept')        await accept.mutateAsync(task.id);
-      else if (action === 'start')    await start.mutateAsync(task.id);
-      else if (action === 'complete') await complete.mutateAsync({ id: task.id });
-      else if (action === 'decline')  await decline.mutateAsync({ id: task.id });
-      else if (action === 'block')    await block.mutateAsync({ id: task.id });
-      else if (action === 'cancel')   await cancel.mutateAsync({ id: task.id });
-      toast({ title: `Assignment ${action}ed` });
-    } catch {
-      toast({ title: 'Error', description: `Could not ${action} assignment.`, variant: 'destructive' });
-    } finally { setActing(null); }
-  }
-
+function AssignmentTableRow({ task, actorMap, index, onOpenDetails }: { task: Assignment; actorMap: Map<string, string>; index: number; onOpenDetails: () => void }) {
   const isOverdue = task.due_at && isPast(parseISO(task.due_at)) && !['completed', 'cancelled', 'declined'].includes(task.status);
   const assignedByName = actorMap.get(task.assigned_by) ?? task.assigned_by.slice(0, 8) + '…';
   const assignedToName = actorMap.get(task.assigned_to) ?? task.assigned_to.slice(0, 8) + '…';
+  const reviewDetail = reviewTypeDetail(task);
 
   return (
     <tr className={`border-b border-border hover:bg-primary/5 transition-colors group ${index % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
@@ -1139,10 +1380,10 @@ function AssignmentTableRow({ task, actorMap, index }: { task: Assignment; actor
       </td>
       <td className="px-4 py-3 max-w-xs">
         <p className="text-sm font-medium text-foreground truncate">{task.title}</p>
-        {task.context && <p className="text-xs text-muted-foreground truncate">{task.context}</p>}
+        <p className="text-xs text-muted-foreground truncate">{reviewDetail || task.context || '—'}</p>
       </td>
       <td className="px-4 py-3">
-        <span className="text-xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-mono">{task.assignment_type.replace('_', ' ')}</span>
+        <span className="text-xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{assignmentTypeLabel(task.assignment_type)}</span>
       </td>
       <td className="px-4 py-3">
         <span className={`text-xs px-1.5 py-0.5 rounded-full ${STATUS_COLORS[task.status] ?? 'bg-muted text-muted-foreground'}`}>{task.status.replace('_', ' ')}</span>
@@ -1153,17 +1394,7 @@ function AssignmentTableRow({ task, actorMap, index }: { task: Assignment; actor
         {task.due_at ? timeAgo(task.due_at) : '—'}
       </td>
       <td className="px-4 py-3">
-        {ACTIVE_STATUSES.includes(task.status) && (
-          <div className="flex gap-1.5">
-            {task.status === 'pending' && <>
-              <ActionBtn label="Accept" icon={<CheckCircle2 className="w-3 h-3" />} onClick={() => act('accept')} loading={acting === 'accept'} color="success" />
-              <ActionBtn label="Decline" icon={<XCircle className="w-3 h-3" />} onClick={() => act('decline')} loading={acting === 'decline'} color="ghost" />
-            </>}
-            {task.status === 'accepted' && <ActionBtn label="Start" icon={<Play className="w-3 h-3" />} onClick={() => act('start')} loading={acting === 'start'} color="primary" />}
-            {task.status === 'in_progress' && <ActionBtn label="Complete" icon={<CheckCircle2 className="w-3 h-3" />} onClick={() => act('complete')} loading={acting === 'complete'} color="success" />}
-            {task.status === 'blocked' && <ActionBtn label="Resume" icon={<Play className="w-3 h-3" />} onClick={() => act('start')} loading={acting === 'start'} color="primary" />}
-          </div>
-        )}
+        <AssignmentActionControls task={task} onOpenDetails={onOpenDetails} />
       </td>
     </tr>
   );
@@ -1174,6 +1405,7 @@ function AssignmentTableRow({ task, actorMap, index }: { task: Assignment; actor
 function EmptyState({ tab }: { tab: Tab }) {
   const copy: Record<Tab, { title: string; sub: string }> = {
     needs_attention: { title: 'Handoff queue is clear', sub: 'Agent approvals, escalations, and assigned work that need your action will appear here.' },
+    review_queue:    { title: 'Review queue is clear', sub: 'Stale Memory, Signal, conflict, and knowledge reviews will appear here ranked by risk.' },
     delegated:       { title: 'Nothing delegated', sub: 'Tasks handed to humans or agents will appear here for follow-through.' },
     all:             { title: 'No handoffs yet', sub: 'This queue records the agent-to-human loop for approvals, reviews, and delegated tasks.' },
   };
@@ -1200,12 +1432,13 @@ export default function InboxPage() {
   const [selectedHitl, setSelectedHitl] = useState<HITLRequest | null>(null);
   const pageSize = 25;
 
-  const { openQuickAdd } = useAppStore();
+  const { openDrawer, openQuickAdd } = useAppStore();
   const { data: whoami } = useWhoAmI() as any;
   const myActorId: string | undefined = whoami?.actor_id;
 
   const hitlQ = useHITLRequests({ status: 'pending', limit: 200 });
   const allHitlQ = useHITLRequests({ status: 'all', limit: 200 });
+  const reviewQueueQ = useAssignmentReviewQueue({ limit: 100 });
   const myAssignQ = useAssignments(myActorId ? { assigned_to: myActorId, limit: 200 } : undefined);
   const delegatedQ = useAssignments(myActorId ? { assigned_by: myActorId, limit: 200 } : undefined);
   const allAssignQ = useAssignments({ limit: 200 });
@@ -1237,6 +1470,8 @@ export default function InboxPage() {
   }, [pendingHitl, allHitl, selectedHitl]);
 
   const myAssignments: Assignment[] = (myAssignQ.data as any)?.assignments ?? [];
+  const reviewQueueAssignments: Assignment[] = (reviewQueueQ.data as any)?.assignments ?? [];
+  const reviewQueueTotal = Number((reviewQueueQ.data as any)?.total ?? reviewQueueAssignments.length);
   const delegatedRaw: Assignment[] = (delegatedQ.data as any)?.assignments ?? [];
   const allAssignmentsRaw: Assignment[] = (allAssignQ.data as any)?.assignments ?? [];
 
@@ -1252,9 +1487,10 @@ export default function InboxPage() {
   // Source list based on tab
   const sourceList = useMemo(() => {
     if (tab === 'needs_attention') return activeMyAssignments;
+    if (tab === 'review_queue') return reviewQueueAssignments;
     if (tab === 'delegated') return activeDelegated;
     return allAssignmentsRaw;
-  }, [tab, activeMyAssignments, activeDelegated, allAssignmentsRaw]);
+  }, [tab, activeMyAssignments, reviewQueueAssignments, activeDelegated, allAssignmentsRaw]);
 
   // Filter + search + sort
   const filtered = useMemo(() => {
@@ -1271,7 +1507,7 @@ export default function InboxPage() {
     if (activeFilters.priority?.length)        result = result.filter(a => activeFilters.priority.includes(a.priority));
     if (activeFilters.assignment_type?.length) result = result.filter(a => activeFilters.assignment_type.includes(a.assignment_type));
 
-    if (sort) {
+    if (sort && !(tab === 'review_queue' && sort.key === 'created_at' && sort.dir === 'desc')) {
       result.sort((a, b) => {
         if (sort.key === 'priority') {
           return sort.dir === 'asc'
@@ -1284,7 +1520,7 @@ export default function InboxPage() {
       });
     }
     return result;
-  }, [sourceList, search, activeFilters, sort]);
+  }, [sourceList, search, activeFilters, sort, tab]);
 
   const filteredHitl = useMemo(() => {
     let result = [...visibleHitl];
@@ -1321,7 +1557,8 @@ export default function InboxPage() {
 
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
   const needsAttentionCount = pendingHitl.length + activeMyAssignments.length;
-  const isLoading = hitlQ.isLoading || allHitlQ.isLoading || myAssignQ.isLoading || allAssignQ.isLoading;
+  const isLoading = hitlQ.isLoading || allHitlQ.isLoading || reviewQueueQ.isLoading || myAssignQ.isLoading || allAssignQ.isLoading;
+  const assignmentSectionLabel = tab === 'review_queue' ? 'Ranked Reviews' : tab === 'needs_attention' ? 'My Tasks' : tab === 'delegated' ? 'Delegated Tasks' : 'Assignments';
 
   const handleFilterChange = (key: string, values: string[]) => {
     setActiveFilters(prev => { const next = { ...prev }; if (values.length === 0) delete next[key]; else next[key] = values; return next; });
@@ -1345,12 +1582,19 @@ export default function InboxPage() {
         title="Handoffs"
         icon={InboxIcon}
         iconClassName="text-destructive"
-        description={headerDescription('Review agent requests and assignments', tab === 'needs_attention' ? needsAttentionCount : tab === 'all' ? filteredHitl.length + filtered.length : filtered.length, 'handoff')}
+        description={tab === 'review_queue'
+          ? headerDescription('Resolve ranked Memory, Signal, conflict, and knowledge reviews', reviewQueueTotal, 'review', 'reviews')
+          : headerDescription('Review agent requests and assignments', tab === 'needs_attention' ? needsAttentionCount : tab === 'all' ? filteredHitl.length + filtered.length : filtered.length, 'handoff')}
       >
         <div className="hidden h-9 rounded-xl border border-border bg-muted p-0.5 md:inline-flex md:mr-2">
           {([{ mode: 'card', icon: LayoutGrid }, { mode: 'table', icon: List }] as const).map(({ mode, icon: Icon }) => (
-            <button key={mode} onClick={() => setView(mode)}
-              className={`p-1.5 rounded-lg transition-all ${view === mode ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
+            <button
+              key={mode}
+              onClick={() => setView(mode)}
+              aria-label={mode === 'card' ? 'Card view' : 'Table view'}
+              title={mode === 'card' ? 'Card view' : 'Table view'}
+              className={`p-1.5 rounded-lg transition-all ${view === mode ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
+            >
               <Icon className="w-4 h-4" />
             </button>
           ))}
@@ -1371,10 +1615,28 @@ export default function InboxPage() {
                   tab === t.key ? 'bg-destructive text-white' : 'bg-muted-foreground/20 text-muted-foreground'
                 }`}>{needsAttentionCount}</span>
               )}
+              {t.key === 'review_queue' && reviewQueueTotal > 0 && (
+                <span className={`min-w-[16px] h-4 px-1 rounded-full text-xs font-bold flex items-center justify-center ${
+                  tab === t.key ? 'bg-amber-500 text-white' : 'bg-muted-foreground/20 text-muted-foreground'
+                }`}>{reviewQueueTotal}</span>
+              )}
             </button>
           ))}
         </div>
       </div>
+
+      {tab === 'review_queue' && (
+        <div className="mx-4 mt-3 rounded-xl border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-sm text-muted-foreground md:mx-6">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <p>
+              Ranked by conflicts, Tier-2 risk, priority, freshness, and account value. Low-risk grounded Memory reviews can be closed here; high-impact or conflicted reviews stay in human review.
+            </p>
+            <Link to="/context?tab=signals" className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground hover:bg-muted">
+              Open Signals
+            </Link>
+          </div>
+        </div>
+      )}
 
       <ListToolbar
         searchValue={search} onSearchChange={setSearch}
@@ -1439,13 +1701,20 @@ export default function InboxPage() {
             ) : view === 'card' ? (
               <div className="px-4 md:px-6 pt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {tab === 'needs_attention' && paginated.length > 0 && (
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">My Tasks</span>
+                  <div className="flex items-center gap-2 mb-1 md:col-span-2 xl:col-span-3">
+                    <span className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">{assignmentSectionLabel}</span>
                     <span className="px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground text-xs font-semibold">{paginated.length}</span>
                     <div className="flex-1 h-px bg-border" />
                   </div>
                 )}
-                {paginated.map(a => <AssignmentCard key={a.id} task={a} actorMap={actorMap} />)}
+                {tab !== 'needs_attention' && paginated.length > 0 && (
+                  <div className="flex items-center gap-2 mb-1 md:col-span-2 xl:col-span-3">
+                    <span className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">{assignmentSectionLabel}</span>
+                    <span className="px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground text-xs font-semibold">{paginated.length}</span>
+                    <div className="flex-1 h-px bg-border" />
+                  </div>
+                )}
+                {paginated.map(a => <AssignmentCard key={a.id} task={a} actorMap={actorMap} onOpenDetails={() => openDrawer('assignment', a.id)} />)}
               </div>
             ) : (
               <div className="px-4 md:px-6 pt-4 overflow-x-auto">
@@ -1465,7 +1734,7 @@ export default function InboxPage() {
                     </thead>
                     <tbody>
                       {paginated.map((a, i) => (
-                        <AssignmentTableRow key={a.id} task={a} actorMap={actorMap} index={i} />
+                        <AssignmentTableRow key={a.id} task={a} actorMap={actorMap} index={i} onOpenDetails={() => openDrawer('assignment', a.id)} />
                       ))}
                     </tbody>
                   </table>

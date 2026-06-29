@@ -78,7 +78,7 @@ export function saveConfigFile(config: CrmyConfig): void {
 
   // Project-local
   const localPath = path.join(process.cwd(), '.crmy.json');
-  fs.writeFileSync(localPath, json);
+  fs.writeFileSync(localPath, json, { mode: 0o600 });
 }
 
 export function loadAuthState(): AuthState | null {

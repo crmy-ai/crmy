@@ -7,6 +7,48 @@ import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnable
 
 type ActivityCreateData = Partial<Activity> & { created_by?: UUID };
 
+const activityDetailSelect = `
+  a.*,
+  performer.display_name AS performer_name,
+  performer.actor_type AS performer_type,
+  CASE
+    WHEN a.subject_type = 'contact' THEN NULLIF(trim(concat_ws(' ', subject_contact.first_name, subject_contact.last_name)), '')
+    WHEN a.subject_type = 'account' THEN subject_account.name
+    WHEN a.subject_type = 'opportunity' THEN subject_opportunity.name
+    WHEN a.subject_type = 'use_case' THEN subject_use_case.name
+    ELSE NULL
+  END AS subject_name,
+  source_receipt.source_label AS source_label,
+  source_receipt.source_type AS source_type,
+  source_receipt.status AS source_status,
+  source_receipt.stage AS source_stage
+`;
+
+const activityDetailJoins = `
+  LEFT JOIN actors performer
+    ON performer.tenant_id = a.tenant_id
+   AND performer.id = a.performed_by
+  LEFT JOIN contacts subject_contact
+    ON a.subject_type = 'contact'
+   AND subject_contact.tenant_id = a.tenant_id
+   AND subject_contact.id = a.subject_id
+  LEFT JOIN accounts subject_account
+    ON a.subject_type = 'account'
+   AND subject_account.tenant_id = a.tenant_id
+   AND subject_account.id = a.subject_id
+  LEFT JOIN opportunities subject_opportunity
+    ON a.subject_type = 'opportunity'
+   AND subject_opportunity.tenant_id = a.tenant_id
+   AND subject_opportunity.id = a.subject_id
+  LEFT JOIN use_cases subject_use_case
+    ON a.subject_type = 'use_case'
+   AND subject_use_case.tenant_id = a.tenant_id
+   AND subject_use_case.id = a.subject_id
+  LEFT JOIN raw_context_sources source_receipt
+    ON source_receipt.tenant_id = a.tenant_id
+   AND source_receipt.id::text = a.detail #>> '{processing,raw_context_source_id}'
+`;
+
 const activityReferenceTables: Record<NonNullable<Activity['subject_type']>, { table: string; label: string }> = {
   contact: { table: 'contacts', label: 'contact' },
   account: { table: 'accounts', label: 'account' },
@@ -123,7 +165,10 @@ export async function createActivity(
 
 export async function getActivity(db: DbPool, tenantId: UUID, id: UUID): Promise<Activity | null> {
   const result = await db.query(
-    'SELECT * FROM activities WHERE id = $1 AND tenant_id = $2',
+    `SELECT ${activityDetailSelect}
+       FROM activities a
+       ${activityDetailJoins}
+      WHERE a.id = $1 AND a.tenant_id = $2`,
     [id, tenantId],
   );
   return (result.rows[0] as Activity) ?? null;

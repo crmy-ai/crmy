@@ -49,10 +49,12 @@ else
 fi
 AGENT_API_KEY="${CRMY_AGENT_API_KEY:-}"
 MODEL_ROUTE_LABEL=""
+INSTALLER_METADATA_JSON=""
 
 NO_DEMO=false
 SKIP_POSTGRES=false
 SKIP_CHECK=false
+SKIP_QUICKSTART=false
 SKIP_MODEL=false
 START_SERVER=false
 NON_INTERACTIVE=false
@@ -85,10 +87,7 @@ Options:
   --admin-email <email>     Admin email for the local workspace
   --admin-password <pass>   Admin password for the local workspace
   --db-route <route>        Database route: docker, url, or local
-  --model-provider <id>     Configure Workspace Agent provider
-                           anthropic, openai, azure_openai, google_gemini,
-                           aws_bedrock, mistral, litellm, openrouter, ollama,
-                           databricks, nvidia_nim, custom
+  --model-provider <id>     Configure Workspace Agent provider from the CRMy catalog
   --model <id>              Configure Workspace Agent model
   --model-base-url <url>    Provider base URL
   --model-api-key <key>     Provider API key
@@ -101,7 +100,7 @@ Options:
   --no-demo                 Initialize without demo data
   --skip-postgres           Do not start the helper Docker Postgres container
   --skip-check              Do not run `crmy doctor` after init
-  --skip-quickstart         Alias for --skip-check
+  --skip-quickstart         Do not run the connector-free quickstart proof after init
   --start-server            Start `crmy server` in the background without prompting
   --non-interactive         Avoid prompts; print next steps instead
   --verbose                 Show command output while installing
@@ -518,7 +517,7 @@ parse_args() {
         shift
         ;;
       --skip-quickstart)
-        SKIP_CHECK=true
+        SKIP_QUICKSTART=true
         shift
         ;;
       --start-server)
@@ -703,155 +702,185 @@ configure_database_route() {
   ok "Database route: $DB_ROUTE_LABEL"
 }
 
+load_installer_metadata() {
+  if [ "$DRY_RUN" = true ]; then
+    return 0
+  fi
+  [ -n "${CRMY_BIN:-}" ] || fail "CRMy CLI must be installed before loading the model catalog."
+
+  INSTALLER_METADATA_JSON="$("$CRMY_BIN" _installer-metadata --json 2>/dev/null || true)"
+  if [ -z "$INSTALLER_METADATA_JSON" ]; then
+    fail "Installed CRMy CLI does not expose installer metadata. Rerun with --install-source source or update @crmy/cli."
+  fi
+}
+
+catalog_query() {
+  local provider="${1:-}"
+  local field="${2:-}"
+  local index="${3:-}"
+
+  [ -n "$INSTALLER_METADATA_JSON" ] || return 1
+
+  CRMY_INSTALLER_METADATA_JSON="$INSTALLER_METADATA_JSON" \
+  CRMY_PROVIDER_ID="$provider" \
+  CRMY_CATALOG_FIELD="$field" \
+  CRMY_CATALOG_INDEX="$index" \
+  CRMY_AGENT_BASE_URL="$AGENT_BASE_URL" \
+  CRMY_AGENT_MODEL="$AGENT_MODEL" \
+  node <<'NODE'
+const meta = JSON.parse(process.env.CRMY_INSTALLER_METADATA_JSON || '{}');
+const providers = Array.isArray(meta.providers) ? meta.providers : [];
+const precertified = Array.isArray(meta.precertified_models) ? meta.precertified_models : [];
+const providerId = process.env.CRMY_PROVIDER_ID || '';
+const field = process.env.CRMY_CATALOG_FIELD || '';
+const index = Number(process.env.CRMY_CATALOG_INDEX || '0');
+const provider = providers.find((item) => item && item.id === providerId);
+
+function write(value) {
+  if (value !== undefined && value !== null) process.stdout.write(String(value));
+}
+
+function normalizedBaseUrl(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function normalizedProvider(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizedModel(value) {
+  return String(value || '').trim();
+}
+
+switch (field) {
+  case 'provider_count':
+    write(providers.length);
+    break;
+  case 'provider_id_by_index':
+    write(providers[index]?.id || '');
+    break;
+  case 'provider_label_by_index':
+    write(providers[index]?.label || '');
+    break;
+  case 'label':
+    write(provider?.label || providerId);
+    break;
+  case 'default_base_url':
+    write(provider?.baseUrl || '');
+    break;
+  case 'default_model':
+    write(provider?.models?.[0]?.id || '');
+    break;
+  case 'model_label':
+    write(provider?.modelLabel || 'Model ID');
+    break;
+  case 'model_placeholder':
+    write(provider?.modelPlaceholder || provider?.models?.[0]?.id || '');
+    break;
+  case 'needs_custom_base_url':
+    process.exit(provider?.needsCustomBaseUrl ? 0 : 1);
+    break;
+  case 'model_count':
+    write(provider?.models?.length || 0);
+    break;
+  case 'model_option': {
+    const model = provider?.models?.[index - 1];
+    if (!model) break;
+    const description = model.description ? ` - ${String(model.description).replace(/\.$/, '')}` : '';
+    write(`${model.id}|${model.label}${description}`);
+    break;
+  }
+  case 'model_ids':
+    write((provider?.models || []).map((model) => model.id).join('\n'));
+    break;
+  case 'requires_key':
+    process.exit(provider?.requiresKey ? 0 : 1);
+    break;
+  case 'key_label':
+    write(provider?.keyLabel || 'API key');
+    break;
+  case 'is_provider':
+    process.exit(provider ? 0 : 1);
+    break;
+  case 'is_precertified': {
+    const baseUrl = normalizedBaseUrl(process.env.CRMY_AGENT_BASE_URL || '');
+    const model = normalizedModel(process.env.CRMY_AGENT_MODEL || '');
+    const match = precertified.find((entry) =>
+      normalizedProvider(entry.provider) === normalizedProvider(providerId)
+      && normalizedBaseUrl(entry.base_url) === baseUrl
+      && normalizedModel(entry.model) === model
+    );
+    process.exit(match ? 0 : 1);
+    break;
+  }
+  default:
+    process.exit(1);
+}
+NODE
+}
+
 provider_label() {
-  case "$1" in
-    anthropic) printf 'Anthropic' ;;
-    openai) printf 'OpenAI' ;;
-    openrouter) printf 'OpenRouter' ;;
-    ollama) printf 'Ollama (local)' ;;
-    litellm) printf 'LiteLLM Proxy' ;;
-    azure_openai) printf 'Azure OpenAI' ;;
-    google_gemini) printf 'Google Gemini' ;;
-    aws_bedrock) printf 'Amazon Bedrock' ;;
-    mistral) printf 'Mistral' ;;
-    databricks) printf 'Databricks AI Gateway' ;;
-    nvidia_nim) printf 'NVIDIA NIM' ;;
-    custom) printf 'Other OpenAI-compatible' ;;
-    *) printf '%s' "$1" ;;
-  esac
+  catalog_query "$1" label || printf '%s' "$1"
 }
 
 provider_default_base_url() {
-  case "$1" in
-    anthropic) printf 'https://api.anthropic.com/v1' ;;
-    openai) printf 'https://api.openai.com/v1' ;;
-    openrouter) printf 'https://openrouter.ai/api/v1' ;;
-    ollama) printf 'http://localhost:11434/v1' ;;
-    litellm) printf 'http://localhost:4000/v1' ;;
-    azure_openai) printf 'https://YOUR-RESOURCE-NAME.openai.azure.com/openai/v1' ;;
-    google_gemini) printf 'https://generativelanguage.googleapis.com/v1beta/openai' ;;
-    aws_bedrock) printf 'https://bedrock-mantle.us-east-1.api.aws/v1' ;;
-    mistral) printf 'https://api.mistral.ai/v1' ;;
-    databricks) printf 'https://YOUR-WORKSPACE.cloud.databricks.com/serving-endpoints' ;;
-    nvidia_nim) printf 'https://integrate.api.nvidia.com/v1' ;;
-    custom) printf 'https://your-gateway.example.com/v1' ;;
-    *) printf '' ;;
-  esac
+  catalog_query "$1" default_base_url || printf ''
 }
 
 provider_default_model() {
-  case "$1" in
-    anthropic) printf 'claude-sonnet-4-20250514' ;;
-    openai) printf 'gpt-5.2' ;;
-    openrouter) printf 'anthropic/claude-sonnet-4' ;;
-    ollama) printf 'qwen2.5:7b-instruct' ;;
-    google_gemini) printf 'gemini-2.5-flash' ;;
-    aws_bedrock) printf 'openai.gpt-oss-120b' ;;
-    mistral) printf 'mistral-large-latest' ;;
-    nvidia_nim) printf 'meta/llama-3.1-70b-instruct' ;;
-    *) printf '' ;;
-  esac
+  catalog_query "$1" default_model || printf ''
 }
 
 provider_model_label() {
-  case "$1" in
-    azure_openai) printf 'Deployment name' ;;
-    litellm) printf 'Proxy model name' ;;
-    openrouter) printf 'Model route' ;;
-    ollama) printf 'Installed model' ;;
-    databricks) printf 'Served model or endpoint model' ;;
-    nvidia_nim) printf 'NIM model ID' ;;
-    aws_bedrock) printf 'Bedrock model ID' ;;
-    *) printf 'Model ID' ;;
-  esac
+  catalog_query "$1" model_label || printf 'Model ID'
 }
 
 provider_model_placeholder() {
-  case "$1" in
-    azure_openai) printf 'my-gpt-deployment' ;;
-    litellm) printf 'customer-context-agent' ;;
-    databricks) printf 'my-serving-endpoint' ;;
-    custom) printf 'your-model-id' ;;
-    *) printf '%s' "$(provider_default_model "$1")" ;;
-  esac
+  catalog_query "$1" model_placeholder || printf ''
 }
 
 provider_needs_custom_base_url() {
-  case "$1" in
-    azure_openai|databricks|custom) return 0 ;;
-    *) return 1 ;;
-  esac
+  catalog_query "$1" needs_custom_base_url >/dev/null 2>&1
 }
 
 provider_model_count() {
-  case "$1" in
-    anthropic) printf '3' ;;
-    openai) printf '4' ;;
-    google_gemini) printf '2' ;;
-    aws_bedrock) printf '2' ;;
-    mistral) printf '3' ;;
-    openrouter) printf '2' ;;
-    ollama) printf '2' ;;
-    nvidia_nim) printf '2' ;;
-    *) printf '0' ;;
-  esac
+  catalog_query "$1" model_count || printf '0'
 }
 
 provider_model_option() {
-  case "$1:$2" in
-    anthropic:1) printf 'claude-sonnet-4-20250514|Claude Sonnet 4 - recommended balance' ;;
-    anthropic:2) printf 'claude-opus-4-20250514|Claude Opus 4 - higher capability' ;;
-    anthropic:3) printf 'claude-3-5-haiku-20241022|Claude Haiku 3.5 - fast/lightweight' ;;
-    openai:1) printf 'gpt-5.2|GPT-5.2 - recommended current option' ;;
-    openai:2) printf 'gpt-5.1|GPT-5.1 - strong reasoning' ;;
-    openai:3) printf 'gpt-5|GPT-5 - baseline GPT-5 reasoning' ;;
-    openai:4) printf 'gpt-5-mini|GPT-5 mini - lower latency/cost' ;;
-    google_gemini:1) printf 'gemini-2.5-flash|Gemini 2.5 Flash - fast function calling' ;;
-    google_gemini:2) printf 'gemini-2.5-pro|Gemini 2.5 Pro - higher capability' ;;
-    aws_bedrock:1) printf 'openai.gpt-oss-120b|GPT OSS 120B on Bedrock - example route' ;;
-    aws_bedrock:2) printf 'us.anthropic.claude-sonnet-4-6|Claude Sonnet on Bedrock - example model ID' ;;
-    mistral:1) printf 'mistral-large-latest|Mistral Large - high capability' ;;
-    mistral:2) printf 'mistral-medium-latest|Mistral Medium - balanced' ;;
-    mistral:3) printf 'mistral-small-latest|Mistral Small - lower latency' ;;
-    openrouter:1) printf 'anthropic/claude-sonnet-4|Claude Sonnet 4 via OpenRouter' ;;
-    openrouter:2) printf 'openai/gpt-5.2|GPT-5.2 via OpenRouter' ;;
-    ollama:1) printf 'qwen2.5:7b-instruct|Qwen 2.5 7B Instruct - local default' ;;
-    ollama:2) printf 'llama3.1:8b|Llama 3.1 8B - common local option' ;;
-    nvidia_nim:1) printf 'meta/llama-3.1-70b-instruct|Llama 3.1 70B Instruct - example route' ;;
-    nvidia_nim:2) printf 'nvidia/llama-3.3-nemotron-super-49b-v1.5|Nemotron Super 49B - NVIDIA-hosted route' ;;
-    *) printf '' ;;
-  esac
+  catalog_query "$1" model_option "$2" || printf ''
+}
+
+provider_model_ids() {
+  catalog_query "$1" model_ids || printf ''
 }
 
 provider_requires_key() {
-  case "$1" in
-    anthropic|openai|openrouter|azure_openai|google_gemini|aws_bedrock|mistral|databricks|nvidia_nim) return 0 ;;
-    *) return 1 ;;
-  esac
+  catalog_query "$1" requires_key >/dev/null 2>&1
 }
 
 provider_key_label() {
-  case "$1" in
-    anthropic) printf 'Anthropic API key' ;;
-    openai) printf 'OpenAI API key' ;;
-    openrouter) printf 'OpenRouter API key' ;;
-    azure_openai) printf 'Azure OpenAI API key' ;;
-    google_gemini) printf 'Gemini API key' ;;
-    aws_bedrock) printf 'Bedrock API key' ;;
-    mistral) printf 'Mistral API key' ;;
-    databricks) printf 'Databricks token' ;;
-    nvidia_nim) printf 'NVIDIA API key' ;;
-    litellm) printf 'LiteLLM virtual key (optional)' ;;
-    custom) printf 'API key (optional)' ;;
-    *) printf 'API key' ;;
-  esac
+  catalog_query "$1" key_label || printf 'API key'
+}
+
+model_is_precertified() {
+  catalog_query "$AGENT_PROVIDER" is_precertified >/dev/null 2>&1
+}
+
+print_model_certification_hint() {
+  if [ "$AGENT_ENABLED" != true ]; then
+    return 0
+  fi
+
+  if model_is_precertified; then
+    ok "Automatic Memory: enabled by CRMy-published model certification"
+  else
+    warn "Automatic Memory: review-only until this model passes 'crmy certify --output ./eval-runs'"
+  fi
 }
 
 validate_provider() {
-  case "$1" in
-    anthropic|openai|azure_openai|google_gemini|aws_bedrock|mistral|litellm|openrouter|ollama|databricks|nvidia_nim|custom) return 0 ;;
-    *) return 1 ;;
-  esac
+  catalog_query "$1" is_provider >/dev/null 2>&1
 }
 
 detect_ollama_model() {
@@ -859,8 +888,10 @@ detect_ollama_model() {
   local tags_base="${base_url%/}"
   tags_base="${tags_base%/v1}"
   local tags_url="${tags_base}/api/tags"
+  local preferred_models
+  preferred_models="$(provider_model_ids "ollama")"
 
-  OLLAMA_TAGS_URL="$tags_url" node <<'NODE' 2>/dev/null || true
+  OLLAMA_TAGS_URL="$tags_url" OLLAMA_PREFERRED_MODELS="$preferred_models" node <<'NODE' 2>/dev/null || true
 (async () => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 900);
@@ -872,7 +903,7 @@ detect_ollama_model() {
       .map((model) => model && model.name)
       .filter(Boolean)
       .sort();
-    const preferred = ['qwen2.5:7b-instruct', 'llama3.1:8b'];
+    const preferred = (process.env.OLLAMA_PREFERRED_MODELS || '').split('\n').filter(Boolean);
     console.log(preferred.find((model) => models.includes(model)) || models[0] || '');
   } catch {
     process.exit(0);
@@ -885,36 +916,25 @@ NODE
 
 choose_provider_from_menu() {
   menu_line '  1) Skip model setup for now - demo still works'
-  menu_line '  2) Anthropic'
-  menu_line '  3) OpenAI'
-  menu_line '  4) Azure OpenAI'
-  menu_line '  5) Google Gemini'
-  menu_line '  6) Amazon Bedrock'
-  menu_line '  7) Mistral'
-  menu_line '  8) LiteLLM Proxy'
-  menu_line '  9) OpenRouter'
-  menu_line ' 10) Ollama (local)'
-  menu_line ' 11) Databricks AI Gateway'
-  menu_line ' 12) NVIDIA NIM'
-  menu_line ' 13) Other OpenAI-compatible'
+
+  local count
+  count="$(catalog_query "" provider_count || printf '0')"
+  [ "$count" -gt 0 ] || fail "Workspace Agent provider catalog is empty."
+
+  local i
+  local label
+  for i in $(seq 0 "$((count - 1))"); do
+    label="$(catalog_query "" provider_label_by_index "$i")"
+    menu_line "$(printf ' %2d) %s' "$((i + 2))" "$label")"
+  done
 
   local choice
-  choice="$(prompt_number "Model provider" "1" "13")"
-  case "$choice" in
-    1) printf 'skip' ;;
-    2) printf 'anthropic' ;;
-    3) printf 'openai' ;;
-    4) printf 'azure_openai' ;;
-    5) printf 'google_gemini' ;;
-    6) printf 'aws_bedrock' ;;
-    7) printf 'mistral' ;;
-    8) printf 'litellm' ;;
-    9) printf 'openrouter' ;;
-    10) printf 'ollama' ;;
-    11) printf 'databricks' ;;
-    12) printf 'nvidia_nim' ;;
-    13) printf 'custom' ;;
-  esac
+  choice="$(prompt_number "Model provider" "1" "$((count + 1))")"
+  if [ "$choice" -eq 1 ]; then
+    printf 'skip'
+    return 0
+  fi
+  catalog_query "" provider_id_by_index "$((choice - 2))"
 }
 
 choose_model_from_menu() {
@@ -964,6 +984,26 @@ configure_model_route() {
     return 0
   fi
 
+  if [ -z "$INSTALLER_METADATA_JSON" ]; then
+    if [ "$DRY_RUN" = true ] && [ -z "$AGENT_PROVIDER$AGENT_MODEL$AGENT_BASE_URL" ]; then
+      AGENT_ENABLED=false
+      MODEL_ROUTE_LABEL="Skipped"
+      ok "Workspace Agent model: skipped"
+      return 0
+    fi
+    if [ "$DRY_RUN" = true ]; then
+      [ -n "$AGENT_PROVIDER" ] || fail "Dry-run model setup needs --model-provider because the catalog is loaded after install."
+      [ -n "$AGENT_MODEL" ] || fail "Dry-run model setup needs --model because the catalog is loaded after install."
+      [ -n "$AGENT_BASE_URL" ] || fail "Dry-run model setup needs --model-base-url because the catalog is loaded after install."
+      AGENT_ENABLED=true
+      MODEL_ROUTE_LABEL="$AGENT_PROVIDER - $AGENT_MODEL"
+      ok "Workspace Agent model: $MODEL_ROUTE_LABEL"
+      warn "Dry-run: model catalog validation will run after the CRMy CLI is installed."
+      return 0
+    fi
+    fail "Workspace Agent model catalog was not loaded."
+  fi
+
   if [ -n "$AGENT_PROVIDER" ] || [ -n "$AGENT_MODEL" ] || [ -n "$AGENT_BASE_URL" ]; then
     AGENT_PROVIDER="${AGENT_PROVIDER:-custom}"
     validate_provider "$AGENT_PROVIDER" || fail "Unknown model provider '$AGENT_PROVIDER'."
@@ -1004,6 +1044,7 @@ configure_model_route() {
     AGENT_ENABLED=true
     MODEL_ROUTE_LABEL="$(provider_label "$AGENT_PROVIDER") - $AGENT_MODEL"
     ok "Workspace Agent model: $MODEL_ROUTE_LABEL"
+    print_model_certification_hint
     return 0
   fi
 
@@ -1061,6 +1102,7 @@ configure_model_route() {
   AGENT_ENABLED=true
   MODEL_ROUTE_LABEL="$(provider_label "$AGENT_PROVIDER") - $AGENT_MODEL"
   ok "Workspace Agent model: $MODEL_ROUTE_LABEL"
+  print_model_certification_hint
 }
 
 configure_demo_data() {
@@ -1151,6 +1193,14 @@ cli_lists_server_subcommand() {
   printf '%s\n' "$help" | grep -Eq "^[[:space:]]+$1([[:space:]]|$)"
 }
 
+cli_supports_installer_metadata() {
+  if [ "$DRY_RUN" = true ]; then
+    return 0
+  fi
+  [ -n "${CRMY_BIN:-}" ] || return 1
+  "$CRMY_BIN" _installer-metadata --json >/dev/null 2>&1
+}
+
 install_cli_from_npm() {
   local target="$PACKAGE_NAME"
   if [ -n "$PACKAGE_VERSION" ]; then
@@ -1230,7 +1280,7 @@ install_cli() {
       ;;
     auto)
       install_cli_from_npm
-      if ! cli_lists_command doctor || ! cli_lists_server_subcommand start; then
+      if ! cli_lists_command doctor || ! cli_lists_server_subcommand start || ! cli_supports_installer_metadata; then
         if [ -n "$PACKAGE_VERSION" ]; then
           fail "Requested $PACKAGE_NAME@$PACKAGE_VERSION is missing the latest setup commands. Rerun without --version, or use --install-source source --repo-ref <ref>."
         fi
@@ -1404,6 +1454,7 @@ init_workspace() {
 
   local init_env=(
     "DATABASE_URL=$DATABASE_URL"
+    "CRMY_SERVER_URL=http://localhost:$PORT"
     "CRMY_ADMIN_EMAIL=$ADMIN_EMAIL"
     "CRMY_ADMIN_PASSWORD=$ADMIN_PASSWORD"
   )
@@ -1434,16 +1485,48 @@ run_setup_check() {
   fi
 
   if [ "$DRY_RUN" = true ]; then
-    run_visible "Checking CRMy setup" "$CRMY_BIN" doctor
+    if [ "$AGENT_ENABLED" = false ]; then
+      run_visible "Checking CRMy setup" "$CRMY_BIN" doctor --port "$PORT" --skip-model-check
+    else
+      run_visible "Checking CRMy setup" "$CRMY_BIN" doctor --port "$PORT"
+    fi
     return 0
   fi
 
   if cli_lists_command doctor; then
-    run_visible "Checking CRMy setup" "$CRMY_BIN" doctor
+    if [ "$AGENT_ENABLED" = false ]; then
+      run_visible "Checking CRMy setup" "$CRMY_BIN" doctor --port "$PORT" --skip-model-check
+    else
+      run_visible "Checking CRMy setup" "$CRMY_BIN" doctor --port "$PORT"
+    fi
     return 0
   fi
 
   warn "This @crmy/cli version does not include doctor. The workspace was initialized; run '$CRMY_BIN server start --port $PORT' to open CRMy."
+}
+
+run_quickstart_check() {
+  if [ "$SKIP_QUICKSTART" = true ]; then
+    warn "Skipping connector-free quickstart proof"
+    return 0
+  fi
+
+  if [ "$NO_DEMO" = true ]; then
+    warn "Skipping connector-free quickstart proof because demo data was not loaded"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" = true ]; then
+    run_visible "Proving connector-free quickstart" "$CRMY_BIN" quickstart --no-seed
+    return 0
+  fi
+
+  if cli_lists_command quickstart; then
+    run_visible "Proving connector-free quickstart" "$CRMY_BIN" quickstart --no-seed
+    return 0
+  fi
+
+  warn "This @crmy/cli version does not include quickstart. Run '$CRMY_BIN agent-smoke' after install to prove the demo path."
 }
 
 command_for_user() {
@@ -1543,21 +1626,24 @@ main() {
   check_platform
   check_node
   configure_database_route
+  install_cli
+  load_installer_metadata
+  maybe_add_path
   configure_model_route
   configure_demo_data
   ensure_postgres
-  install_cli
-  maybe_add_path
   if [ "$DRY_RUN" = true ]; then
     step "Using workspace directory $WORK_DIR"
     init_workspace
     run_setup_check
+    run_quickstart_check
   else
     mkdir -p "$WORK_DIR"
     (
       cd "$WORK_DIR"
       init_workspace
       run_setup_check
+      run_quickstart_check
     )
   fi
   print_next_steps
