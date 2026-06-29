@@ -49,6 +49,12 @@ import { processNextBatch as processContextOutboxBatch } from '../dist/workers/c
 import { listCrmyEvalSuites, runCrmyEval } from '../dist/evals/runner.js';
 import { certifyTenantModel } from '../dist/services/model-certification-runner.js';
 import { modelCertificationMeetsAutoPromoteGate, recordedCertificationForModel } from '../dist/services/model-certification.js';
+import {
+  agentReviewResolutionPolicy,
+  createOrConsolidateReviewAssignment,
+  expireLowValueReviewAssignments,
+  rankReviewAssignments,
+} from '../dist/services/review-queue.js';
 
 const baseInput = {
   tenantId: '11111111-1111-4111-8111-111111111111',
@@ -4106,10 +4112,14 @@ class FakeContradictionAssignmentDb {
       };
     }
 
-    if (text.startsWith('SELECT id FROM assignments')) {
-      return this.existingKeys.has(params[1])
-        ? { rows: [{ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }], rowCount: 1 }
-        : { rows: [], rowCount: 0 };
+    if (text.startsWith('SELECT * FROM assignments WHERE tenant_id')) {
+      const contradictionKey = params[5];
+      const assignment = this.assignments.find(a => a.metadata.contradiction_key === contradictionKey);
+      return assignment ? { rows: [assignment], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+
+    if (text.startsWith('SELECT a.*, count(*) OVER()::int AS review_count')) {
+      return { rows: [], rowCount: 0 };
     }
 
     if (text.startsWith('INSERT INTO assignments')) {
@@ -4131,6 +4141,14 @@ class FakeContradictionAssignmentDb {
       };
       this.assignments.push(assignment);
       this.existingKeys.add(assignment.metadata.contradiction_key);
+      return { rows: [assignment], rowCount: 1 };
+    }
+
+    if (text.startsWith('UPDATE assignments SET')) {
+      const assignment = this.assignments.find(a => a.id === params[1]);
+      if (!assignment) return { rows: [], rowCount: 0 };
+      assignment.priority = params[2];
+      assignment.metadata = JSON.parse(params[3]);
       return { rows: [assignment], rowCount: 1 };
     }
 
@@ -4169,6 +4187,263 @@ test('createContradictionReviewAssignments creates one deduped review assignment
   );
   assert.equal(replay.assignments.length, 0);
   assert.equal(replay.skipped_existing, 1);
+});
+
+function reviewAssignment(over = {}) {
+  return {
+    id: over.id ?? `assignment-${Math.random().toString(36).slice(2, 8)}`,
+    tenant_id: baseInput.tenantId,
+    title: over.title ?? 'Review Memory',
+    description: over.description ?? null,
+    assignment_type: over.assignment_type ?? 'stale_context_review',
+    assigned_by: over.assigned_by ?? recoveryActor.actor_id,
+    assigned_to: over.assigned_to ?? recoveryActor.actor_id,
+    subject_type: over.subject_type ?? 'opportunity',
+    subject_id: over.subject_id ?? '99999999-9999-4999-8999-999999999999',
+    priority: over.priority ?? 'normal',
+    status: over.status ?? 'pending',
+    due_at: over.due_at ?? null,
+    context: over.context ?? null,
+    metadata: over.metadata ?? {},
+    created_at: over.created_at ?? '2026-01-01T00:00:00.000Z',
+    updated_at: over.updated_at ?? '2026-01-01T00:00:00.000Z',
+  };
+}
+
+class FakeReviewQueueDb {
+  constructor() {
+    this.assignments = [];
+    this.events = [];
+  }
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+
+    if (text.startsWith('SELECT * FROM assignments WHERE tenant_id')) {
+      const [, , reviewKey, contextEntryId, knowledgeClaimId, contradictionKey] = params;
+      const assignment = this.assignments.find(a => a.tenant_id === params[0]
+        && !['completed', 'declined', 'cancelled'].includes(a.status)
+        && (
+          a.metadata.review_key === reviewKey
+          || a.metadata.review_keys?.includes?.(reviewKey)
+          || (contextEntryId && (
+            a.context === contextEntryId
+            || a.metadata.review_context_entry_id === contextEntryId
+            || a.metadata.context_entry_id === contextEntryId
+            || a.metadata.stale_context_entry_id === contextEntryId
+            || a.metadata.signal_context_entry_id === contextEntryId
+            || a.metadata.promoted_context_entry_id === contextEntryId
+          ))
+          || (knowledgeClaimId && a.metadata.knowledge_claim_id === knowledgeClaimId)
+          || (contradictionKey && a.metadata.contradiction_key === contradictionKey)
+        ));
+      return { rows: assignment ? [assignment] : [], rowCount: assignment ? 1 : 0 };
+    }
+
+    if (text.startsWith('SELECT a.*, count(*) OVER()::int AS review_count')) {
+      const [, subjectType, subjectId] = params;
+      const rows = this.assignments
+        .filter(a => a.subject_type === subjectType
+          && a.subject_id === subjectId
+          && !['completed', 'declined', 'cancelled'].includes(a.status)
+          && (['stale_context_review', 'freshness_context_review', 'signal_review', 'contradiction_review', 'knowledge_claim_review'].includes(a.assignment_type)
+            || a.metadata.review_key))
+        .map(a => ({ ...a, review_count: this.assignments.length }));
+      return { rows: rows.slice(0, 1), rowCount: rows.length ? 1 : 0 };
+    }
+
+    if (text.startsWith('INSERT INTO assignments')) {
+      const assignment = reviewAssignment({
+        id: `review-${String(this.assignments.length + 1).padStart(3, '0')}`,
+        tenant_id: params[0],
+        title: params[1],
+        description: params[2],
+        assignment_type: params[3],
+        assigned_by: params[4],
+        assigned_to: params[5],
+        subject_type: params[6],
+        subject_id: params[7],
+        priority: params[8],
+        due_at: params[9],
+        context: params[10],
+        metadata: JSON.parse(params[11]),
+      });
+      this.assignments.push(assignment);
+      return { rows: [assignment], rowCount: 1 };
+    }
+
+    if (text.startsWith("UPDATE assignments SET status = 'cancelled'")) {
+      const olderThanDays = params[4];
+      const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+      const metadata = JSON.parse(params[3]);
+      const rows = [];
+      for (const assignment of this.assignments) {
+        const createdAt = new Date(assignment.created_at).getTime();
+        const lowValue = assignment.priority === 'low'
+          || assignment.metadata.review_value === 'low'
+          || assignment.metadata.low_value_review === 'true';
+        if (!['completed', 'declined', 'cancelled'].includes(assignment.status)
+          && lowValue
+          && createdAt < cutoff) {
+          assignment.status = 'cancelled';
+          assignment.metadata = { ...assignment.metadata, ...metadata };
+          rows.push(assignment);
+        }
+      }
+      return { rows, rowCount: rows.length };
+    }
+
+    if (text.startsWith('UPDATE assignments SET')) {
+      const assignment = this.assignments.find(a => a.id === params[1]);
+      if (!assignment) return { rows: [], rowCount: 0 };
+      for (const match of text.matchAll(/(priority|metadata) = \$(\d+)/g)) {
+        const field = match[1];
+        const value = params[Number(match[2]) - 1];
+        assignment[field] = field === 'metadata' ? JSON.parse(value) : value;
+      }
+      return { rows: [assignment], rowCount: 1 };
+    }
+
+    if (text.startsWith('INSERT INTO events')) {
+      this.events.push({ event_type: params[1], object_id: params[5] });
+      return { rows: [{ id: this.events.length }], rowCount: 1 };
+    }
+
+    if (text.startsWith('SELECT pg_notify')) {
+      return { rows: [], rowCount: 0 };
+    }
+
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
+test('review queue consolidation merges repeated reviews and caps open reviews per subject', async () => {
+  const db = new FakeReviewQueueDb();
+  const first = await createOrConsolidateReviewAssignment(db, baseInput.tenantId, {
+    title: 'Review stale Memory',
+    assignment_type: 'stale_context_review',
+    assigned_by: recoveryActor.actor_id,
+    assigned_to: recoveryActor.actor_id,
+    subject_type: 'opportunity',
+    subject_id: '99999999-9999-4999-8999-999999999999',
+    priority: 'normal',
+    context: 'context-entry-1',
+    metadata: { stale_context_entry_id: 'context-entry-1', context_type: 'next_step' },
+  }, {
+    reviewKey: 'context:context-entry-1',
+    reasons: ['stale_memory'],
+    contextEntryId: 'context-entry-1',
+    contextType: 'next_step',
+  });
+  assert.equal(first.created, true);
+
+  const duplicate = await createOrConsolidateReviewAssignment(db, baseInput.tenantId, {
+    title: 'Review Signal',
+    assignment_type: 'signal_review',
+    assigned_by: recoveryActor.actor_id,
+    assigned_to: recoveryActor.actor_id,
+    subject_type: 'opportunity',
+    subject_id: '99999999-9999-4999-8999-999999999999',
+    priority: 'high',
+    context: 'context-entry-1',
+    metadata: { signal_context_entry_id: 'context-entry-1', context_type: 'next_step' },
+  }, {
+    reviewKey: 'signal:context-entry-1',
+    reasons: ['signal_review'],
+    contextEntryId: 'context-entry-1',
+    contextType: 'next_step',
+  });
+  assert.equal(duplicate.created, false);
+  assert.equal(duplicate.consolidated, true);
+  assert.equal(db.assignments.length, 1);
+  assert.equal(db.assignments[0].priority, 'high');
+  assert.deepEqual(db.assignments[0].metadata.review_reasons.sort(), ['signal_review', 'stale_memory']);
+
+  for (let i = 2; i <= 5; i++) {
+    await createOrConsolidateReviewAssignment(db, baseInput.tenantId, {
+      title: `Review ${i}`,
+      assignment_type: 'stale_context_review',
+      assigned_by: recoveryActor.actor_id,
+      assigned_to: recoveryActor.actor_id,
+      subject_type: 'opportunity',
+      subject_id: '99999999-9999-4999-8999-999999999999',
+      priority: 'normal',
+      context: `context-entry-${i}`,
+      metadata: { context_type: 'preference' },
+    }, {
+      reviewKey: `context:context-entry-${i}`,
+      contextEntryId: `context-entry-${i}`,
+      contextType: 'preference',
+    });
+  }
+
+  const capped = await createOrConsolidateReviewAssignment(db, baseInput.tenantId, {
+    title: 'Overflow review',
+    assignment_type: 'stale_context_review',
+    assigned_by: recoveryActor.actor_id,
+    assigned_to: recoveryActor.actor_id,
+    subject_type: 'opportunity',
+    subject_id: '99999999-9999-4999-8999-999999999999',
+    priority: 'normal',
+    context: 'context-entry-6',
+    metadata: { context_type: 'preference' },
+  }, {
+    reviewKey: 'context:context-entry-6',
+    contextEntryId: 'context-entry-6',
+    contextType: 'preference',
+  });
+  assert.equal(capped.created, false);
+  assert.equal(capped.capped, true);
+  assert.equal(db.assignments.length, 5);
+});
+
+test('rankReviewAssignments prioritizes conflicts and Tier-2 reviews first', () => {
+  const ranked = rankReviewAssignments([
+    reviewAssignment({ id: 'low', assignment_type: 'stale_context_review', priority: 'urgent', metadata: { context_type: 'preference' } }),
+    reviewAssignment({ id: 'tier2', assignment_type: 'stale_context_review', priority: 'normal', metadata: { context_type: 'forecast' } }),
+    reviewAssignment({ id: 'conflict', assignment_type: 'contradiction_review', priority: 'high', metadata: { context_type: 'deal_risk' } }),
+  ], new Date('2026-06-01T00:00:00Z'));
+  assert.deepEqual(ranked.map(a => a.id), ['conflict', 'tier2', 'low']);
+});
+
+test('agentReviewResolutionPolicy allows grounded Tier-0/1 reviews but blocks Tier-2 and conflicts', () => {
+  const assignment = reviewAssignment({ assignment_type: 'stale_context_review', metadata: { context_type: 'next_step' } });
+  const entry = {
+    id: 'entry-1',
+    context_type: 'next_step',
+    evidence: [{ source: 'activity', snippet: 'Follow up next week.' }],
+  };
+  assert.equal(agentReviewResolutionPolicy({ assignment, entry }).allowed, true);
+  assert.equal(agentReviewResolutionPolicy({ assignment, entry: { ...entry, context_type: 'forecast' } }).allowed, false);
+  assert.equal(agentReviewResolutionPolicy({ assignment, entry, openConflictCount: 1 }).allowed, false);
+  assert.equal(agentReviewResolutionPolicy({ assignment, entry: { ...entry, evidence: [] } }).allowed, false);
+  assert.equal(agentReviewResolutionPolicy({
+    assignment: reviewAssignment({ assignment_type: 'contradiction_review' }),
+    entry,
+  }).allowed, false);
+});
+
+test('expireLowValueReviewAssignments cancels only aged low-value reviews', async () => {
+  const db = new FakeReviewQueueDb();
+  db.assignments.push(
+    reviewAssignment({
+      id: 'old-low',
+      assignment_type: 'stale_context_review',
+      priority: 'low',
+      created_at: '2026-01-01T00:00:00.000Z',
+    }),
+    reviewAssignment({
+      id: 'old-high',
+      assignment_type: 'stale_context_review',
+      priority: 'high',
+      created_at: '2026-01-01T00:00:00.000Z',
+    }),
+  );
+  const expired = await expireLowValueReviewAssignments(db, baseInput.tenantId, 30);
+  assert.equal(expired, 1);
+  assert.equal(db.assignments.find(a => a.id === 'old-low').status, 'cancelled');
+  assert.equal(db.assignments.find(a => a.id === 'old-high').status, 'pending');
+  assert.equal(db.events.length, 1);
 });
 
 class FakeDataQualityDb {
@@ -4329,6 +4604,7 @@ test('retry-sensitive MCP operations expose idempotency keys', () => {
 
 test('side-effecting MCP tools expose idempotency keys unless explicitly read-only', () => {
   const readOnlyNameMatches = new Set([
+    'assignment_review_queue',
     'customer_record_resolve',
     'entity_resolve',
   ]);

@@ -3550,6 +3550,21 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.get('/assignments/review-queue', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_review_queue');
+      const result = await handler({
+        assigned_to: qs(req.query.assigned_to),
+        mine: String(req.query.mine ?? '').toLowerCase() === 'true',
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   router.get('/assignments/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
@@ -3581,6 +3596,15 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const handler = toolHandler(db, 'assignment_complete');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/assignments/:id/review-resolve', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_review_resolve');
       const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }

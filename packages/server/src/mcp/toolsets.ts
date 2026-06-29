@@ -76,6 +76,7 @@ export const TOOLSET_DEFINITIONS: Record<string, ToolsetDefinition> = {
       'activity_search',
       'assignment_create',
       'assignment_list',
+      'assignment_review_queue',
       'contact_search',
       'contact_get',
       'account_search',
@@ -121,6 +122,8 @@ export const TOOLSET_DEFINITIONS: Record<string, ToolsetDefinition> = {
       'context_signal_handoff',
       'context_signal_group_reject',
       'context_signal_group_promote',
+      'assignment_review_queue',
+      'assignment_review_resolve',
     ],
   },
   memory_promotion: {
@@ -155,7 +158,7 @@ export const TOOLSET_DEFINITIONS: Record<string, ToolsetDefinition> = {
       'email_draft_preview',
     ],
   },
-  legacy_workflows: {
+  experimental_workflows: {
     description: 'Opt-in experimental workflow-builder tools. Not part of the default Core Profile.',
     tools: [
       'workflow_create',
@@ -171,7 +174,7 @@ export const TOOLSET_DEFINITIONS: Record<string, ToolsetDefinition> = {
       'workflow_template_list',
     ],
   },
-  legacy_sequences: {
+  experimental_sequences: {
     description: 'Opt-in experimental sequence tools. Not part of the default Core Profile.',
     tools: [
       'sequence_create',

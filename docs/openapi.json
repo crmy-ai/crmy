@@ -4685,6 +4685,46 @@
           }
         }
       },
+      "AssignmentReviewQueue": {
+        "type": "object",
+        "properties": {
+          "assigned_to": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "contact",
+              "account",
+              "opportunity",
+              "use_case"
+            ]
+          },
+          "subject_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "AssignmentReviewResolve": {
+        "type": "object",
+        "properties": {
+          "extend_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 730
+          }
+        }
+      },
       "AssignmentDecline": {
         "type": "object",
         "properties": {
@@ -13329,6 +13369,93 @@
         }
       }
     },
+    "/assignments/review-queue": {
+      "get": {
+        "tags": [
+          "Assignments"
+        ],
+        "summary": "List ranked review assignments that need attention",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "assigned_to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "boolean"
+            },
+            "required": false,
+            "name": "mine",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "contact",
+                "account",
+                "opportunity",
+                "use_case"
+              ]
+            },
+            "required": false,
+            "name": "subject_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "subject_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/assignments/{id}": {
       "get": {
         "tags": [
@@ -13564,6 +13691,63 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AssignmentComplete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignmentRecord"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assignments/{id}/review-resolve": {
+      "post": {
+        "tags": [
+          "Assignments"
+        ],
+        "summary": "Resolve a low-risk Memory review assignment",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignmentReviewResolve"
               }
             }
           }

@@ -2,8 +2,9 @@
 
 ## Status
 
-WS1 checkpoint implemented; WS2-WS7 not started. This is the next milestone after
-0.9.4 and the largest single step toward a 1.0 production release. It is the
+WS1 checkpoint implemented; WS2 implemented in a stacked checkpoint; WS3-WS7 not
+started. This is the next milestone after 0.9.4 and the largest single step
+toward a 1.0 production release. It is the
 authoritative development plan for 0.9.5; the
 [0.8–1.0 roadmap](roadmap-0.8-1.0.md) tracks the broader sequence and the
 [Strategic Refocus](roadmap-0.8-1.0.md#strategic-refocus-the-governed-action--provenance-control-plane)
@@ -130,6 +131,21 @@ model to `certified` and auto-promotion turns on.
 
 Make the queue small, ranked, and mostly self-clearing so "seemingly automatic"
 survives contact with real data.
+
+**Status:** Implemented in the WS2 checkpoint. Review assignment creation now
+deduplicates/consolidates stale, signal, contradiction, and Trusted Fact review
+work through a shared queue helper with per-subject caps. Signal promotion
+auto-refreshes existing matching Memory on re-grounding, extends its review
+window, retires supporting Signals, and completes linked review assignments with
+audit receipts. Explicit `context_review`, batch review, Signal promotion,
+supersede, and contradiction resolution also clear obsolete review assignments.
+`assignment_review_queue` exposes the ranked "needs you" list over MCP/REST/CLI,
+and `assignment_review_resolve` lets scoped agents clear grounded Tier-0/1
+reviews while refusing Tier-2, contradiction, conflicted, or ungrounded cases.
+Low-value aged review assignments auto-expire during existing review sweeps.
+
+**Deviation:** review ranking uses assignment metadata for account-value scoring
+when present; WS2 does not add a new account-value backfill or UI redesign.
 
 **Deliverables:**
 

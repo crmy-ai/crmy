@@ -218,7 +218,7 @@ function KnowledgeSourcesSettings() {
           <div className="grid gap-3 md:grid-cols-2">
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Name</label>
-              <input className={`${inputCls} mt-1 w-full`} value={name} onChange={event => setName(event.target.value)} placeholder="Product facts source" />
+              <input className={`${inputCls} mt-1 w-full`} value={name} onChange={event => setName(event.target.value)} placeholder="Trusted facts source" />
             </div>
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Transport</label>

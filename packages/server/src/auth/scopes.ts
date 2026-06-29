@@ -58,10 +58,12 @@ const TOOL_SCOPES: Record<string, string[]> = {
   // ── Assignments ──
   assignment_get: ['assignments:read'],
   assignment_list: ['assignments:read'],
+  assignment_review_queue: ['assignments:read'],
   assignment_create: ['assignments:write'],
   assignment_update: ['assignments:write'],
   assignment_accept: ['assignments:write'],
   assignment_complete: ['assignments:write'],
+  assignment_review_resolve: ['assignments:write', 'context:write'],
   assignment_decline: ['assignments:write'],
   assignment_start: ['assignments:write'],
   assignment_block: ['assignments:write'],

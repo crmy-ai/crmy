@@ -37,6 +37,7 @@ import { checkContextConvergence } from '../../services/context-convergence.js';
 import { createContradictionReviewAssignments } from '../../services/context-review-assignments.js';
 import { assertActionPolicyAllowsMutation, evaluateActionPolicy } from '../../services/action-policy.js';
 import { attachSignalToGroup, completeSignalGroupDetails, createSignalGroupHandoff, dismissSignalGroup, promoteSignalGroup } from '../../services/signal-groups.js';
+import { completeOpenReviewAssignmentsForContextEntry } from '../../services/review-queue.js';
 import { withSignalReadiness } from '../../services/signal-readiness.js';
 import { ensureActorRecordForContext, resolveActorRecordId } from '../../services/actor-identity.js';
 import { assertActivityAccess, assertSubjectAccess, resolveOwnerFilter } from '../../services/access-control.js';
@@ -766,6 +767,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             afterData: entry,
             metadata: { action_policy: policy },
           });
+          const resolvedAssignments = await completeOpenReviewAssignmentsForContextEntry(db, actor.tenant_id, entry.id, {
+            actorId: actor.actor_id,
+            actorType: actor.actor_type,
+            reason: 'signal_promoted',
+          });
           outboxRepo.insertJob(db, actor.tenant_id, 'context_entry', entry.id, entry as unknown as Record<string, unknown>)
             .catch((err: unknown) => console.warn(`[outbox] context_signal_promote enqueue ${entry.id}: ${(err as Error).message}`));
           return {
@@ -775,7 +781,10 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               objectType: 'context_entry',
               objectId: entry.id,
               eventId: event_id,
-              sideEffects: ['search_index:queued'],
+              sideEffects: [
+                'search_index:queued',
+                ...(resolvedAssignments.length > 0 ? ['review_assignments:completed'] : []),
+              ],
             }),
           };
         });
@@ -1058,6 +1067,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         // Enqueue replacement entry for search re-indexing — fire-and-forget.
         outboxRepo.insertJob(db, actor.tenant_id, 'context_entry', result.new.id, result.new as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[outbox] context_supersede enqueue ${result.new.id}: ${(err as Error).message}`));
+        const resolvedAssignments = await completeOpenReviewAssignmentsForContextEntry(db, actor.tenant_id, result.old.id, {
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          reason: 'context_superseded',
+        });
 
         return {
           context_entry: result.new,
@@ -1067,7 +1081,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             objectType: 'context_entry',
             objectId: result.new.id,
             eventId: event_id,
-            sideEffects: ['embedding:queued', 'search_index:queued'],
+            sideEffects: [
+              'embedding:queued',
+              'search_index:queued',
+              ...(resolvedAssignments.length > 0 ? ['review_assignments:completed'] : []),
+            ],
           }),
         };
         });
@@ -1124,11 +1142,17 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         }
         const entry = await contextRepo.reviewContextEntry(db, actor.tenant_id, input.id, extendDays);
         if (!entry) throw notFound('ContextEntry', input.id);
+        const resolvedAssignments = await completeOpenReviewAssignmentsForContextEntry(db, actor.tenant_id, entry.id, {
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          reason: 'context_reviewed',
+        });
         return {
           context_entry: entry,
           mutation: mutationReceipt(actor, {
             objectType: 'context_entry',
             objectId: entry.id,
+            sideEffects: resolvedAssignments.length > 0 ? ['review_assignments:completed'] : [],
           }),
         };
         });
@@ -2060,6 +2084,20 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             authored_by: actorRecordId,
           },
         );
+        const resolvedByKept = await completeOpenReviewAssignmentsForContextEntry(db, actor.tenant_id, keepEntry.id, {
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          reason: 'contradiction_resolved',
+        });
+        const resolvedBySuperseded = await completeOpenReviewAssignmentsForContextEntry(db, actor.tenant_id, result.old.id, {
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          reason: 'contradiction_resolved',
+        });
+        const resolvedAssignmentCount = new Set([
+          ...resolvedByKept.map(assignment => assignment.id),
+          ...resolvedBySuperseded.map(assignment => assignment.id),
+        ]).size;
 
         return {
           resolved: true,
@@ -2070,6 +2108,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           mutation: mutationReceipt(actor, {
             objectType: 'context_entry',
             objectId: result.new.id,
+            sideEffects: resolvedAssignmentCount > 0 ? ['review_assignments:completed'] : [],
           }),
         };
         });
@@ -2194,6 +2233,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         }, async () => {
         let updated = 0;
         let not_found = 0;
+        let resolvedAssignments = 0;
         // Process in parallel batches of 20 to avoid overwhelming the DB
         const batchSize = 20;
         for (let i = 0; i < input.entry_ids.length; i += batchSize) {
@@ -2203,7 +2243,16 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               const existing = await contextRepo.getContextEntry(db, actor.tenant_id as UUID, id as UUID);
               if (!existing) return null;
               await assertSubjectAccess(db, actor, existing.subject_type as SubjectType, existing.subject_id);
-              return contextRepo.reviewContextEntry(db, actor.tenant_id as UUID, id as UUID, input.extend_days);
+              const reviewed = await contextRepo.reviewContextEntry(db, actor.tenant_id as UUID, id as UUID, input.extend_days);
+              if (reviewed) {
+                const completed = await completeOpenReviewAssignmentsForContextEntry(db, actor.tenant_id, reviewed.id, {
+                  actorId: actor.actor_id,
+                  actorType: actor.actor_type,
+                  reason: 'context_reviewed_batch',
+                });
+                resolvedAssignments += completed.length;
+              }
+              return reviewed;
             }),
           );
           for (const r of results) {
@@ -2219,6 +2268,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           mutation: mutationReceipt(actor, {
             objectType: 'context_entry',
             objectId: 'batch',
+            sideEffects: resolvedAssignments > 0 ? ['review_assignments:completed'] : [],
           }),
         };
         });
