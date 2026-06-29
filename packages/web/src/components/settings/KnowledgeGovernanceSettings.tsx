@@ -15,13 +15,24 @@
 import React, { useState } from 'react';
 import { toast } from '@/hooks/use-toast';
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import {
+  ClaimScoreBar,
+  ContextClaimPanel,
+} from '@/components/crm/ContextClaimPanel';
+import {
   useKnowledgeClaims, useReviewKnowledgeClaim, useDetectKnowledgeConflicts,
   type KnowledgeClaimListFilters,
 } from '@/api/hooks';
 import type { KnowledgeClaimRecord, KnowledgeReviewDecision } from '@crmy/shared';
 import {
   BookOpen, CheckCircle2, XCircle, Archive, Clock, RotateCcw, ShieldCheck,
-  AlertTriangle, Search, GitCompareArrows, Loader2, Filter,
+  AlertTriangle, Search, GitCompareArrows, Loader2, Filter, Eye, ExternalLink,
 } from 'lucide-react';
 
 const btnPrimary = 'inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40';
@@ -94,6 +105,17 @@ function formatDate(iso?: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function formatDateTime(iso?: string): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function typeLabel(type: KnowledgeClaimRecord['knowledge_type']): string {
   return type.charAt(0).toUpperCase() + type.slice(1);
 }
@@ -124,9 +146,16 @@ function customerGate(claim: KnowledgeClaimRecord, expired: boolean): { label: s
   return { label: 'trusted', tone: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600' };
 }
 
-function ClaimCard({ claim }: { claim: KnowledgeClaimRecord }) {
-  const review = useReviewKnowledgeClaim();
-  const expired = !!claim.valid_until && new Date(claim.valid_until).getTime() < Date.now();
+function isClaimExpired(claim: KnowledgeClaimRecord): boolean {
+  return !!claim.valid_until && new Date(claim.valid_until).getTime() < Date.now();
+}
+
+function claimSourceLabel(claim: KnowledgeClaimRecord): string {
+  return claim.source_label || claim.source_ref || claim.source_url || 'No source label';
+}
+
+function claimReviewState(claim: KnowledgeClaimRecord) {
+  const expired = isClaimExpired(claim);
   const isApproved = claim.approval_status === 'approved';
   const needsApproval = claim.approval_status === 'pending' || claim.approval_status === 'unapproved';
   const isRetired = claim.status === 'deprecated' || claim.status === 'rejected';
@@ -147,18 +176,110 @@ function ClaimCard({ claim }: { claim: KnowledgeClaimRecord }) {
         : 'Trust for customer use'
     : 'Approve as trusted';
 
+  return {
+    expired,
+    isRetired,
+    canApproveForCustomer,
+    canApproveInternal,
+    gate,
+    customerActionLabel,
+  };
+}
+
+function handleOpenKey(event: React.KeyboardEvent<HTMLElement>, onOpen: () => void) {
+  if (event.target !== event.currentTarget) return;
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    onOpen();
+  }
+}
+
+function KnowledgeClaimActions({
+  claim,
+  onOpen,
+  onReviewed,
+  compact = false,
+}: {
+  claim: KnowledgeClaimRecord;
+  onOpen?: () => void;
+  onReviewed?: (claim: KnowledgeClaimRecord) => void;
+  compact?: boolean;
+}) {
+  const review = useReviewKnowledgeClaim();
+  const {
+    expired,
+    isRetired,
+    canApproveForCustomer,
+    canApproveInternal,
+    customerActionLabel,
+  } = claimReviewState(claim);
+
   const apply = (decision: KnowledgeReviewDecision, approved_for_external_use?: boolean) => {
     review.mutate(
       { id: claim.id, decision, approved_for_external_use },
       {
-        onSuccess: (updated) => toast({ title: 'Trusted Fact updated', description: `"${claim.title}" -> ${updated.status} / ${updated.approval_status}` }),
+        onSuccess: (updated) => {
+          onReviewed?.(updated);
+          toast({ title: 'Trusted Fact updated', description: `"${claim.title}" -> ${updated.status} / ${updated.approval_status}` });
+        },
         onError: (err: unknown) => toast({ title: 'Review failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' }),
       },
     );
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <div className={`flex items-center gap-2 flex-wrap ${compact ? 'min-w-max justify-end' : ''}`} onClick={(event) => event.stopPropagation()}>
+      {review.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+      {onOpen && (
+        <button className={btnOutline} type="button" onClick={onOpen}>
+          <Eye className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Details
+        </button>
+      )}
+      {canApproveForCustomer && (
+        <button className={btnApprove} type="button" disabled={review.isPending} onClick={() => apply('approve', true)} title="Approve and allow in customer-facing drafts">
+          <ShieldCheck className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />{customerActionLabel}
+        </button>
+      )}
+      {canApproveInternal && (
+        <button className={btnApproveOutline} type="button" disabled={review.isPending} onClick={() => apply('approve', false)} title="Approve for internal use only">
+          <CheckCircle2 className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Approve internal
+        </button>
+      )}
+      {claim.status === 'active' && (
+        <button className={btnOutline} type="button" disabled={review.isPending} onClick={() => apply('mark_stale')}>
+          <Clock className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Mark needs review
+        </button>
+      )}
+      {((claim.status === 'stale' && !expired) || isRetired) && (
+        <button className={btnOutline} type="button" disabled={review.isPending} onClick={() => apply('reactivate')}>
+          <RotateCcw className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Restore
+        </button>
+      )}
+      {claim.status !== 'deprecated' && (
+        <button className={btnOutline} type="button" disabled={review.isPending} onClick={() => apply('deprecate')}>
+          <Archive className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Retire
+        </button>
+      )}
+      {claim.status !== 'rejected' && (
+        <button className={btnOutline} type="button" disabled={review.isPending} onClick={() => apply('reject')}>
+          <XCircle className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Reject
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ClaimCard({ claim, onOpen }: { claim: KnowledgeClaimRecord; onOpen: (claim: KnowledgeClaimRecord) => void }) {
+  const { expired, gate } = claimReviewState(claim);
+
+  return (
+    <div
+      className="rounded-lg border border-border bg-card p-4 cursor-pointer transition-colors hover:border-primary/30 hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-ring"
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(claim)}
+      onKeyDown={(event) => handleOpenKey(event, () => onOpen(claim))}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -184,39 +305,235 @@ function ClaimCard({ claim }: { claim: KnowledgeClaimRecord }) {
       </div>
 
       <div className="mt-3 flex items-center gap-2 flex-wrap">
-        {review.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-        {canApproveForCustomer && (
-          <button className={btnApprove} disabled={review.isPending} onClick={() => apply('approve', true)} title="Approve and allow in customer-facing drafts">
-            <ShieldCheck className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />{customerActionLabel}
-          </button>
-        )}
-        {canApproveInternal && (
-          <button className={btnApproveOutline} disabled={review.isPending} onClick={() => apply('approve', false)} title="Approve for internal use only">
-            <CheckCircle2 className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Approve internal
-          </button>
-        )}
-        {claim.status === 'active' && (
-          <button className={btnOutline} disabled={review.isPending} onClick={() => apply('mark_stale')}>
-            <Clock className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Mark needs review
-          </button>
-        )}
-        {((claim.status === 'stale' && !expired) || isRetired) && (
-          <button className={btnOutline} disabled={review.isPending} onClick={() => apply('reactivate')}>
-            <RotateCcw className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Restore
-          </button>
-        )}
-        {claim.status !== 'deprecated' && (
-          <button className={btnOutline} disabled={review.isPending} onClick={() => apply('deprecate')}>
-            <Archive className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Retire
-          </button>
-        )}
-        {claim.status !== 'rejected' && (
-          <button className={btnOutline} disabled={review.isPending} onClick={() => apply('reject')}>
-            <XCircle className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Reject
-          </button>
-        )}
+        <KnowledgeClaimActions claim={claim} onOpen={() => onOpen(claim)} />
       </div>
     </div>
+  );
+}
+
+function freshnessLabel(claim: KnowledgeClaimRecord, expired: boolean): string {
+  if (expired && claim.valid_until) return `Expired ${formatDate(claim.valid_until)}`;
+  if (claim.status === 'stale') return 'Needs review';
+  if (claim.last_verified_at) return `Verified ${formatDate(claim.last_verified_at)}`;
+  if (claim.valid_until) return `Valid until ${formatDate(claim.valid_until)}`;
+  return 'Current';
+}
+
+function KnowledgeClaimsTable({
+  claims,
+  onOpen,
+}: {
+  claims: KnowledgeClaimRecord[];
+  onOpen: (claim: KnowledgeClaimRecord) => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-border text-sm">
+          <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2">Fact</th>
+              <th className="px-3 py-2">Source</th>
+              <th className="px-3 py-2">Trust state</th>
+              <th className="px-3 py-2">Type/category</th>
+              <th className="px-3 py-2">Freshness</th>
+              <th className="px-3 py-2">Updated</th>
+              <th className="px-3 py-2 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {claims.map(claim => {
+              const { expired, gate } = claimReviewState(claim);
+              return (
+                <tr
+                  key={claim.id}
+                  className="cursor-pointer align-top transition-colors hover:bg-muted/40 focus-within:bg-muted/40"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpen(claim)}
+                  onKeyDown={(event) => handleOpenKey(event, () => onOpen(claim))}
+                >
+                  <td className="max-w-sm px-3 py-3">
+                    <p className="font-semibold text-foreground">{claim.title}</p>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{claim.summary || claim.body}</p>
+                  </td>
+                  <td className="max-w-[14rem] px-3 py-3">
+                    <p className="truncate text-xs font-medium text-foreground">{claimSourceLabel(claim)}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{claim.source_priority}</p>
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="flex max-w-[12rem] flex-wrap gap-1.5">
+                      <Badge tone={gate.tone}>{gate.label}</Badge>
+                      <Badge tone={APPROVAL_TONE[claim.approval_status] ?? APPROVAL_TONE.unapproved}>{APPROVAL_LABEL[claim.approval_status] ?? claim.approval_status}</Badge>
+                      {!claim.grounded && <Badge tone="border-warning/30 bg-warning/10 text-warning">ungrounded</Badge>}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="flex max-w-[12rem] flex-wrap gap-1.5">
+                      <Badge tone="border-info/30 bg-info/10 text-info">{typeLabel(claim.knowledge_type)}</Badge>
+                      <Badge tone="border-border bg-muted text-muted-foreground">{claim.category}</Badge>
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground">{freshnessLabel(claim, expired)}</td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground">{formatDate(claim.updated_at)}</td>
+                  <td className="px-3 py-3">
+                    <KnowledgeClaimActions claim={claim} compact onOpen={() => onOpen(claim)} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DetailPanel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-border bg-card p-4">
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <div className="mt-3 space-y-3">{children}</div>
+    </section>
+  );
+}
+
+function DetailRow({ label, children }: { label: string; children?: React.ReactNode }) {
+  const empty = children === undefined || children === null || children === '';
+  return (
+    <div className="grid gap-1 text-sm sm:grid-cols-[9rem_1fr]">
+      <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</span>
+      <div className="min-w-0 break-words text-foreground">
+        {empty ? <span className="text-muted-foreground">Not provided</span> : children}
+      </div>
+    </div>
+  );
+}
+
+function TokenList({ items, empty }: { items: string[]; empty: string }) {
+  if (!items.length) return <span className="text-muted-foreground">{empty}</span>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map(item => (
+        <Badge key={item} tone="border-border bg-muted text-muted-foreground">{item}</Badge>
+      ))}
+    </div>
+  );
+}
+
+function KnowledgeClaimDrawer({
+  claim,
+  onClose,
+  onReviewed,
+}: {
+  claim: KnowledgeClaimRecord | null;
+  onClose: () => void;
+  onReviewed: (claim: KnowledgeClaimRecord) => void;
+}) {
+  const expired = claim ? isClaimExpired(claim) : false;
+  const gate = claim ? customerGate(claim, expired) : null;
+
+  return (
+    <Sheet open={Boolean(claim)} onOpenChange={open => { if (!open) onClose(); }}>
+      <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        {claim && gate ? (
+          <>
+            <SheetHeader className="border-b border-border px-5 pb-4 pt-5 text-left">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <Badge tone="border-info/30 bg-info/10 text-info">{typeLabel(claim.knowledge_type)}</Badge>
+                <Badge tone="border-border bg-muted text-muted-foreground">{claim.category}</Badge>
+                <Badge tone={gate.tone}>{gate.label}</Badge>
+                <Badge tone={APPROVAL_TONE[claim.approval_status] ?? APPROVAL_TONE.unapproved}>{APPROVAL_LABEL[claim.approval_status] ?? claim.approval_status}</Badge>
+                <Badge tone={STATUS_TONE[claim.status] ?? STATUS_TONE.deprecated}>{STATUS_LABEL[claim.status] ?? claim.status}</Badge>
+              </div>
+              <SheetTitle className="font-display text-lg leading-snug">{claim.title}</SheetTitle>
+              <SheetDescription>
+                Trusted Fact detail, source provenance, governance, and scope.
+              </SheetDescription>
+            </SheetHeader>
+
+            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+              <ContextClaimPanel
+                label="Trusted Fact"
+                tone="memory"
+                title={claim.body || claim.title}
+                chips={(
+                  <div className="flex flex-wrap items-center justify-end gap-2 text-xs font-medium">
+                    <span className="rounded-full border border-border/70 bg-background/50 px-2.5 py-1 text-muted-foreground">
+                      {claim.source_priority}
+                    </span>
+                    <span className={`rounded-full border px-2.5 py-1 ${claim.grounded ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-warning/30 bg-warning/10 text-warning'}`}>
+                      {claim.grounded ? 'Grounded' : 'Ungrounded'}
+                    </span>
+                  </div>
+                )}
+                score={typeof claim.confidence === 'number' ? (
+                  <ClaimScoreBar label="Confidence" value={claim.confidence} />
+                ) : undefined}
+                lifecycle={(
+                  <>
+                    <span className={`rounded-full border px-2.5 py-1 ${gate.tone}`}>{gate.label}</span>
+                    <span className="rounded-full border border-border bg-background px-2.5 py-1 text-muted-foreground">
+                      {claim.approved_for_external_use ? 'Customer use allowed' : 'Internal use only'}
+                    </span>
+                  </>
+                )}
+                helper={claim.summary}
+              />
+
+              <DetailPanel title="Claim">
+                <DetailRow label="Title">{claim.title}</DetailRow>
+                <DetailRow label="Body">{claim.body}</DetailRow>
+                <DetailRow label="Summary">{claim.summary}</DetailRow>
+              </DetailPanel>
+
+              <DetailPanel title="Source and provenance">
+                <DetailRow label="Source label">{claim.source_label}</DetailRow>
+                <DetailRow label="Source URL">
+                  {claim.source_url ? (
+                    <a
+                      href={claim.source_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex max-w-full items-center gap-1 text-primary hover:underline"
+                    >
+                      <span className="truncate">{claim.source_url}</span>
+                      <ExternalLink className="h-3.5 w-3.5 flex-shrink-0" />
+                    </a>
+                  ) : undefined}
+                </DetailRow>
+                <DetailRow label="Source ref">{claim.source_ref}</DetailRow>
+                <DetailRow label="Version">{claim.source_version}</DetailRow>
+                <DetailRow label="External key">{claim.external_key}</DetailRow>
+                <DetailRow label="Priority">{claim.source_priority}</DetailRow>
+                <DetailRow label="Grounding">{claim.grounded ? 'Grounded in source material' : 'Not grounded in source material'}</DetailRow>
+              </DetailPanel>
+
+              <DetailPanel title="Governance">
+                <DetailRow label="Approval">{APPROVAL_LABEL[claim.approval_status] ?? claim.approval_status}</DetailRow>
+                <DetailRow label="External use">{claim.approved_for_external_use ? 'Allowed' : 'Not allowed'}</DetailRow>
+                <DetailRow label="Visibility">{claim.visibility}</DetailRow>
+                <DetailRow label="Status">{STATUS_LABEL[claim.status] ?? claim.status}</DetailRow>
+                <DetailRow label="Effective">{formatDateTime(claim.effective_at)}</DetailRow>
+                <DetailRow label="Valid until">{formatDateTime(claim.valid_until)}</DetailRow>
+                <DetailRow label="Last verified">{formatDateTime(claim.last_verified_at)}</DetailRow>
+                <DetailRow label="Review owner">{claim.review_owner_id}</DetailRow>
+                <DetailRow label="Updated">{formatDateTime(claim.updated_at)}</DetailRow>
+              </DetailPanel>
+
+              <DetailPanel title="Scope">
+                <DetailRow label="Products"><TokenList items={claim.product_scope} empty="All products" /></DetailRow>
+                <DetailRow label="Competitors"><TokenList items={claim.competitors} empty="None" /></DetailRow>
+              </DetailPanel>
+            </div>
+
+            <div className="border-t border-border px-5 py-4">
+              <KnowledgeClaimActions claim={claim} onReviewed={onReviewed} />
+            </div>
+          </>
+        ) : null}
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -277,11 +594,12 @@ function ConflictsPanel() {
   );
 }
 
-export default function KnowledgeGovernanceSettings() {
+export default function KnowledgeGovernanceSettings({ viewMode = 'cards' }: { viewMode?: 'cards' | 'table' } = {}) {
   const [typeFilter, setTypeFilter] = useState<KnowledgeTypeFilter>('all');
   const [filterKey, setFilterKey] = useState<FilterKey>('needs_review');
   const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
+  const [selectedClaim, setSelectedClaim] = useState<KnowledgeClaimRecord | null>(null);
 
   const active = FILTERS.find(f => f.key === filterKey)!;
   const { data, isLoading, isError, error } = useKnowledgeClaims({
@@ -387,9 +705,21 @@ export default function KnowledgeGovernanceSettings() {
       {!isLoading && !isError && claims.length > 0 && (
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">{formatFactCount(visibleFactCount)}</p>
-          {claims.map(c => <ClaimCard key={c.id} claim={c} />)}
+          {viewMode === 'table' ? (
+            <KnowledgeClaimsTable claims={claims} onOpen={setSelectedClaim} />
+          ) : (
+            <div className="space-y-3">
+              {claims.map(c => <ClaimCard key={c.id} claim={c} onOpen={setSelectedClaim} />)}
+            </div>
+          )}
         </div>
       )}
+
+      <KnowledgeClaimDrawer
+        claim={selectedClaim}
+        onClose={() => setSelectedClaim(null)}
+        onReviewed={setSelectedClaim}
+      />
     </div>
   );
 }

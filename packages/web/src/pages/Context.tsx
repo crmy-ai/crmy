@@ -4,11 +4,12 @@
 import { TopBar } from '@/components/layout/TopBar';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Bot, CalendarDays, CheckCircle2, FileText, GitBranch, LayoutGrid, Library, List, Mail, Network, Sparkles } from 'lucide-react';
+import { ArrowRight, Bot, CalendarDays, CheckCircle2, FileText, GitBranch, Library, Mail, Network, Sparkles } from 'lucide-react';
 import { ContextBrowser } from '@/components/crm/ContextBrowser';
 import { ContextLineageView } from '@/components/crm/ContextLineageView';
 import { ObservationsDashboard } from '@/components/crm/ObservationsDashboard';
 import { SignalGroupsBrowser } from '@/components/crm/SignalGroupsBrowser';
+import { ViewModeToggle, type ViewMode } from '@/components/crm/ViewModeToggle';
 import { useActivities, useCalendarConnections, useContextEntries, useContextSourceConnections, useDbConfig, useMailboxConnections, useSignalGroups } from '@/api/hooks';
 import { getUser } from '@/api/client';
 import { headerDescription } from '@/lib/headerCopy';
@@ -17,36 +18,6 @@ import { GraphTab } from './GraphExplorerPage';
 
 type ContextTab = 'sources' | 'browser' | 'signals' | 'lineage' | 'connectors' | 'graph';
 type PrimaryContextTab = 'sources' | 'browser' | 'signals' | 'lineage';
-type ViewMode = 'cards' | 'table';
-
-function HeaderViewToggle({
-  value,
-  onChange,
-}: {
-  value: ViewMode;
-  onChange: (mode: ViewMode) => void;
-}) {
-  return (
-    <div className="hidden h-9 rounded-xl border border-border bg-muted p-0.5 md:inline-flex md:mr-2">
-      <button
-        type="button"
-        onClick={() => onChange('cards')}
-        className={`rounded-lg p-1.5 transition-all ${value === 'cards' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-        aria-label="Card view"
-      >
-        <LayoutGrid className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange('table')}
-        className={`rounded-lg p-1.5 transition-all ${value === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-        aria-label="Table view"
-      >
-        <List className="h-4 w-4" />
-      </button>
-    </div>
-  );
-}
 
 function ContextProofStrip({
   observationTotal,
@@ -315,8 +286,8 @@ export default function ContextPage() {
           </span>
         ) : null}
       >
-        {tab === 'signals' && <HeaderViewToggle value={signalViewMode} onChange={setSignalViewMode} />}
-        {tab === 'browser' && <HeaderViewToggle value={memoryViewMode} onChange={setMemoryViewMode} />}
+        {tab === 'signals' && <ViewModeToggle value={signalViewMode} onChange={setSignalViewMode} className="md:mr-2" />}
+        {tab === 'browser' && <ViewModeToggle value={memoryViewMode} onChange={setMemoryViewMode} className="md:mr-2" />}
       </TopBar>
 
       <div className="flex items-center gap-2 overflow-x-auto px-4 md:px-6 pt-4 border-b border-border pb-0">
