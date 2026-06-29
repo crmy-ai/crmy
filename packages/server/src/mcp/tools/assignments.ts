@@ -26,6 +26,24 @@ import {
   isGlobalActor,
 } from '../../services/access-control.js';
 import { getActionContext, verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
+import {
+  resolveLowRiskReviewAssignment,
+  searchRankedReviewQueue,
+} from '../../services/review-queue.js';
+
+const assignmentReviewQueue = z.object({
+  assigned_to: z.string().uuid().optional(),
+  mine: z.boolean().default(false),
+  subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional(),
+  subject_id: z.string().uuid().optional(),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+
+const assignmentReviewResolve = z.object({
+  id: z.string().uuid(),
+  extend_days: z.number().int().min(1).max(730).optional(),
+  idempotency_key: z.string().max(128).optional(),
+});
 
 function runAssignmentOperation<T>(
   db: DbPool,
@@ -213,6 +231,49 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         });
         const visible = await filterVisibleAssignments(db, actor, result.data, input.limit ?? 20);
         return { assignments: visible, next_cursor: result.next_cursor, total: isGlobalActor(actor) ? result.total : visible.length };
+      },
+    },
+    {
+      name: 'assignment_review_queue',
+      tier: 'core',
+      description: 'Ranked "needs you" list for review work: contradictions and Tier-2/high-risk items first, then stale/freshness/Signal reviews by risk, priority, recency, and account value. Use this before resolving Memory Health or Signal review tasks.',
+      inputSchema: assignmentReviewQueue,
+      handler: async (input: z.infer<typeof assignmentReviewQueue>, actor: ActorContext) => {
+        if (input.subject_type && input.subject_id) {
+          await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
+        }
+        const result = await searchRankedReviewQueue(db, actor.tenant_id, {
+          assigned_to: input.mine ? actor.actor_id : input.assigned_to,
+          subject_type: input.subject_type,
+          subject_id: input.subject_id,
+          limit: Math.min((input.limit ?? 20) * 3, 100),
+        });
+        const visible = await filterVisibleAssignments(db, actor, result.assignments, input.limit ?? 20);
+        return { assignments: visible, total: isGlobalActor(actor) ? result.total : visible.length };
+      },
+    },
+    {
+      name: 'assignment_review_resolve',
+      tier: 'core',
+      description: 'Resolve a low-risk Memory review assignment by marking the linked Tier-0/1 Memory as reviewed and completing the assignment. Refuses Tier-2, contradiction, ungrounded, or conflicted reviews.',
+      inputSchema: assignmentReviewResolve,
+      handler: async (input: z.infer<typeof assignmentReviewResolve>, actor: ActorContext) => {
+        return runAssignmentOperation(db, actor, 'assignment_review_resolve', input, async () => {
+          const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
+          if (!before) throw notFound('Assignment', input.id);
+          await assertAssignmentAccess(db, actor, before);
+          const result = await resolveLowRiskReviewAssignment(db, actor.tenant_id, before, actor, input.extend_days);
+          queueAssignmentIndex(db, result.assignment as unknown as Record<string, unknown>);
+          return {
+            assignment: result.assignment,
+            context_entry: result.context_entry,
+            mutation: mutationReceipt(actor, {
+              objectType: 'assignment',
+              objectId: result.assignment.id,
+              sideEffects: ['context_entry:reviewed', 'assignment:completed'],
+            }),
+          };
+        });
       },
     },
     {

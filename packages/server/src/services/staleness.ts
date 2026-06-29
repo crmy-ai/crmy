@@ -14,9 +14,9 @@
 
 import type { DbPool } from '../db/pool.js';
 import type { UUID } from '@crmy/shared';
-import * as assignmentRepo from '../db/repos/assignments.js';
 import * as contextRepo from '../db/repos/context-entries.js';
 import { shouldMarkMemoryDueForReview } from './memory-trust.js';
+import { createOrConsolidateReviewAssignment, expireLowValueReviewAssignments } from './review-queue.js';
 
 interface StaleEntryRow {
   id: UUID;
@@ -63,15 +63,13 @@ async function findBestReviewActor(
 }
 
 /**
- * Check whether an open Memory review assignment already exists for this context entry,
- * OR if the entry was reviewed within the last 24 hours (avoids infinite re-trigger loop).
+ * Check whether the entry was reviewed within the last 24 hours.
  */
-async function staleAssignmentExists(
+async function recentlyReviewed(
   db: DbPool,
   tenantId: UUID,
   entryId: UUID,
 ): Promise<boolean> {
-  // Skip if already reviewed within 24 hours
   const reviewedResult = await db.query(
     `SELECT id FROM context_entries
      WHERE id = $1 AND tenant_id = $2
@@ -79,17 +77,7 @@ async function staleAssignmentExists(
      LIMIT 1`,
     [entryId, tenantId],
   );
-  if (reviewedResult.rows.length > 0) return true;
-
-  const result = await db.query(
-    `SELECT id FROM assignments
-     WHERE tenant_id = $1
-       AND status NOT IN ('completed', 'declined', 'cancelled')
-       AND metadata->>'stale_context_entry_id' = $2
-     LIMIT 1`,
-    [tenantId, entryId],
-  );
-  return result.rows.length > 0;
+  return reviewedResult.rows.length > 0;
 }
 
 /**
@@ -101,6 +89,7 @@ export async function processStaleEntriesForTenant(
   tenantId: UUID,
   limit = 20,
 ): Promise<number> {
+  await expireLowValueReviewAssignments(db, tenantId);
   const freshnessRows = await contextRepo.listActiveMemoryForFreshness(db, tenantId, Math.max(100, limit * 10));
   const dueIds = computeMemoryIdsDueForReview(freshnessRows);
   if (dueIds.length > 0) {
@@ -124,8 +113,7 @@ export async function processStaleEntriesForTenant(
   let created = 0;
 
   for (const entry of entries) {
-    // Skip if an open assignment already exists for this entry
-    if (await staleAssignmentExists(db, tenantId, entry.id)) continue;
+    if (await recentlyReviewed(db, tenantId, entry.id)) continue;
 
     const assignTo = await findBestReviewActor(
       db, tenantId, entry.subject_type, entry.subject_id, entry.authored_by,
@@ -136,7 +124,7 @@ export async function processStaleEntriesForTenant(
       month: 'short', day: 'numeric', year: 'numeric',
     });
 
-    await assignmentRepo.createAssignment(db, tenantId, {
+    const result = await createOrConsolidateReviewAssignment(db, tenantId, {
       title: `Review Memory: ${entry.context_type}`,
       description: `This ${entry.context_type} Memory reached its review date on ${expired}.\n\n"${snippet}${snippet.length >= 120 ? '...' : ''}"`,
       assignment_type: 'stale_context_review',
@@ -147,9 +135,14 @@ export async function processStaleEntriesForTenant(
       priority: 'normal',
       context: entry.id, // context entry ID stored here so assignee can retrieve it
       metadata: { stale_context_entry_id: entry.id, context_type: entry.context_type },
+    }, {
+      reviewKey: `context:${entry.id}`,
+      reasons: ['stale_memory'],
+      contextEntryId: entry.id,
+      contextType: entry.context_type,
     });
 
-    created++;
+    if (result.created) created++;
   }
 
   return created;

@@ -828,6 +828,15 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'get', path: '/assignments/review-queue',
+  tags: ['Assignments'],
+  summary: 'List ranked review assignments that need attention',
+  security: bearer,
+  request: { query: Req.AssignmentReviewQueue },
+  responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
   method: 'get', path: '/assignments/{id}',
   tags: ['Assignments'],
   summary: 'Get an assignment',
@@ -849,6 +858,7 @@ for (const [action, schema, summary] of [
   ['accept',   undefined,                'Accept a pending assignment'] as const,
   ['start',    undefined,                'Transition assignment to in_progress'] as const,
   ['complete', Req.AssignmentComplete,   'Mark an assignment as completed'] as const,
+  ['review-resolve', Req.AssignmentReviewResolve, 'Resolve a low-risk Memory review assignment'] as const,
   ['decline',  Req.AssignmentDecline,    'Decline an assignment'] as const,
   ['block',    Req.AssignmentBlock,      'Mark an assignment as blocked'] as const,
   ['cancel',   Req.AssignmentCancel,     'Cancel an assignment'] as const,

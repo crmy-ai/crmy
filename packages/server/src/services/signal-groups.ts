@@ -30,6 +30,7 @@ import {
   tier2AutopromotePolicyFromEnv,
   type Tier2AutopromotePolicy,
 } from './memory-trust.js';
+import { completeOpenReviewAssignmentsForContextEntry } from './review-queue.js';
 
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have',
@@ -532,6 +533,25 @@ async function recomputeGroup(
   return refreshed;
 }
 
+async function findRegroundingTarget(
+  db: DbPool,
+  tenantId: UUID | string,
+  candidate: ContextEntry,
+): Promise<ContextEntry | null> {
+  const convergence = await checkContextConvergence(db, tenantId as UUID, {
+    subject_type: candidate.subject_type,
+    subject_id: candidate.subject_id,
+    context_type: candidate.context_type,
+    title: candidate.title,
+    body: candidate.body,
+    structured_data: candidate.structured_data,
+  });
+  const top = convergence.candidates[0];
+  if (!top || top.suggested_action !== 'use_existing') return null;
+  if (top.entry.id === candidate.id) return null;
+  return top.entry;
+}
+
 async function promoteReadyGroup(
   db: DbPool,
   tenantId: UUID | string,
@@ -568,23 +588,74 @@ async function promoteReadyGroup(
   });
   if (policy.decision === 'blocked' || policy.decision === 'approval_required') return null;
 
+  const promotionGrounding = groundingMethodForPromotion({
+    humanReviewed: approved,
+    independentSourceCount: group.independent_source_count,
+  });
+  const regroundingTarget = await findRegroundingTarget(db, tenantId, candidate);
+  if (regroundingTarget) {
+    const reviewed = await contextRepo.reviewContextEntry(
+      db,
+      tenantId as UUID,
+      regroundingTarget.id,
+      memoryFreshnessWindowDays(regroundingTarget.context_type),
+      promotionGrounding,
+    );
+    if (reviewed) {
+      await signalGroupRepo.markGroupPromoted(db, tenantId, group.id, reviewed.id);
+      await signalGroupRepo.updateSignalGroupMetadata(db, tenantId, group.id, {
+        auto_regrounded_context_entry_id: reviewed.id,
+        auto_regrounded_signal_id: candidate.id,
+        readiness: signalReadinessForGroup({
+          ...group,
+          status: 'promoted',
+          promoted_context_entry_id: reviewed.id,
+          blocked_reason: null,
+        }),
+      });
+      await signalGroupRepo.markSupportSignalsSupersededExcept(db, tenantId, group.id, reviewed.id);
+      const resolvedAssignments = await completeOpenReviewAssignmentsForContextEntry(db, tenantId, reviewed.id, {
+        actorId,
+        actorType: policyActor?.actor_type ?? 'agent',
+        reason: 'regrounded_by_signal_group',
+        signalGroupId: group.id,
+        regroundingSignalId: candidate.id,
+      });
+      await emitEvent(db, {
+        tenantId: tenantId as UUID,
+        eventType: 'context.signal_group_promoted',
+        actorId: actorId as UUID,
+        actorType: policyActor?.actor_type ?? 'agent',
+        objectType: 'context_entry',
+        objectId: reviewed.id,
+        afterData: reviewed,
+        metadata: {
+          signal_group_id: group.id,
+          aggregate_confidence: group.aggregate_confidence,
+          support_count: group.support_count,
+          independent_source_count: group.independent_source_count,
+          auto_regrounded: true,
+          auto_resolved_review_assignment_ids: resolvedAssignments.map(assignment => assignment.id),
+        },
+      });
+      outboxRepo.insertJob(db, tenantId as UUID, 'context_entry', reviewed.id, reviewed as unknown as Record<string, unknown>)
+        .catch((err: unknown) => console.warn(`[outbox] signal group re-ground ${reviewed.id}: ${(err as Error).message}`));
+      await ensureEmbeddingBestEffort(db, tenantId, 'context_entry', reviewed.id, reviewed.body);
+      return reviewed;
+    }
+  }
+
   const promoted = await contextRepo.promoteSignal(db, tenantId as UUID, candidate.id, actorId as UUID, {
     confidence: group.aggregate_confidence,
     evidence,
-    grounding_method: groundingMethodForPromotion({
-      humanReviewed: approved,
-      independentSourceCount: group.independent_source_count,
-    }),
+    grounding_method: promotionGrounding,
     valid_until: candidate.valid_until ?? defaultMemoryReviewDate(candidate.context_type),
     structured_data: {
       ...candidate.structured_data,
       signal_group_id: group.id,
       signal_group_support_count: group.support_count,
       signal_group_independent_sources: group.independent_source_count,
-      grounding_method: groundingMethodForPromotion({
-        humanReviewed: approved,
-        independentSourceCount: group.independent_source_count,
-      }),
+      grounding_method: promotionGrounding,
       memory_claim_tier: memoryClaimTier(candidate.context_type),
       promotion_policy: promotionPolicyLabel(candidate.context_type),
     },
@@ -601,6 +672,13 @@ async function promoteReadyGroup(
     }),
   });
   await signalGroupRepo.markSupportSignalsSupersededExcept(db, tenantId, group.id, promoted.id);
+  const resolvedAssignments = await completeOpenReviewAssignmentsForContextEntry(db, tenantId, promoted.id, {
+    actorId,
+    actorType: policyActor?.actor_type ?? 'agent',
+    reason: 'promoted_from_signal_group',
+    signalGroupId: group.id,
+    regroundingSignalId: candidate.id,
+  });
   await emitEvent(db, {
     tenantId: tenantId as UUID,
     eventType: 'context.signal_group_promoted',
@@ -614,6 +692,7 @@ async function promoteReadyGroup(
       aggregate_confidence: group.aggregate_confidence,
       support_count: group.support_count,
       independent_source_count: group.independent_source_count,
+      auto_resolved_review_assignment_ids: resolvedAssignments.map(assignment => assignment.id),
     },
   });
   outboxRepo.insertJob(db, tenantId as UUID, 'context_entry', promoted.id, promoted as unknown as Record<string, unknown>)

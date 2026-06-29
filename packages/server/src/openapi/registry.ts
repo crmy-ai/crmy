@@ -660,6 +660,16 @@ export const Req = {
   AssignmentCreate: registry.register('AssignmentCreate', S.assignmentCreate),
   AssignmentUpdate: registry.register('AssignmentUpdate', S.assignmentUpdate.shape.patch),
   AssignmentSearch: registry.register('AssignmentSearch', S.assignmentSearch),
+  AssignmentReviewQueue: registry.register('AssignmentReviewQueue', z.object({
+    assigned_to: S.uuid.optional(),
+    mine: z.boolean().optional(),
+    subject_type: S.subjectType.optional(),
+    subject_id: S.uuid.optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+  })),
+  AssignmentReviewResolve: registry.register('AssignmentReviewResolve', z.object({
+    extend_days: z.number().int().min(1).max(730).optional(),
+  })),
   AssignmentDecline: registry.register('AssignmentDecline', z.object({ reason: z.string().optional() })),
   AssignmentBlock: registry.register('AssignmentBlock', z.object({ reason: z.string().optional() })),
   AssignmentCancel: registry.register('AssignmentCancel', z.object({ reason: z.string().optional() })),

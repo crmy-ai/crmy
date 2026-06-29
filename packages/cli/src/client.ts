@@ -212,9 +212,11 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   assignment_create: { method: 'POST', path: () => '/api/v1/assignments' },
   assignment_get: { method: 'GET', path: (i) => `/api/v1/assignments/${i.id}` },
   assignment_list: { method: 'GET', path: (i) => `/api/v1/assignments?limit=${i.limit ?? 20}${i.assigned_to ? `&assigned_to=${i.assigned_to}` : ''}${i.assigned_by ? `&assigned_by=${i.assigned_by}` : ''}${i.status ? `&status=${i.status}` : ''}` },
+  assignment_review_queue: { method: 'GET', path: (i) => `/api/v1/assignments/review-queue?limit=${i.limit ?? 20}${i.assigned_to ? `&assigned_to=${i.assigned_to}` : ''}${i.mine ? '&mine=true' : ''}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}` },
   assignment_update: { method: 'PATCH', path: (i) => `/api/v1/assignments/${i.id}` },
   assignment_accept: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/accept` },
   assignment_complete: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/complete` },
+  assignment_review_resolve: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/review-resolve` },
   assignment_decline: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/decline` },
 
   // Context Entries

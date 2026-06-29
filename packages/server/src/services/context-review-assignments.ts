@@ -3,28 +3,12 @@
 
 import type { Assignment, UUID } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
-import * as assignmentRepo from '../db/repos/assignments.js';
 import { detectContradictions, type ContradictionWarning } from './contradictions.js';
+import { createOrConsolidateReviewAssignment } from './review-queue.js';
 
 function contradictionKey(warning: ContradictionWarning): string {
   const ids = [warning.entry_a.id, warning.entry_b.id].sort();
   return ids.join(':');
-}
-
-async function openContradictionAssignmentExists(
-  db: DbPool,
-  tenantId: UUID,
-  key: string,
-): Promise<boolean> {
-  const result = await db.query(
-    `SELECT id FROM assignments
-     WHERE tenant_id = $1
-       AND status NOT IN ('completed', 'declined', 'cancelled')
-       AND metadata->>'contradiction_key' = $2
-     LIMIT 1`,
-    [tenantId, key],
-  );
-  return result.rows.length > 0;
 }
 
 function chooseAssignee(warning: ContradictionWarning): UUID {
@@ -62,14 +46,10 @@ export async function createContradictionReviewAssignments(
 
   for (const warning of warnings.slice(0, input.limit ?? 20)) {
     const key = contradictionKey(warning);
-    if (await openContradictionAssignmentExists(db, tenantId, key)) {
-      skippedExisting++;
-      continue;
-    }
 
     const entryALabel = warning.entry_a.title ?? warning.entry_a.context_type;
     const entryBLabel = warning.entry_b.title ?? warning.entry_b.context_type;
-    const assignment = await assignmentRepo.createAssignment(db, tenantId, {
+    const result = await createOrConsolidateReviewAssignment(db, tenantId, {
       title: `Resolve contradictory context: ${warning.conflict_field}`,
       description: `${warning.conflict_evidence}\n\nCompare "${entryALabel}" and "${entryBLabel}", then use context_resolve_contradiction or context_supersede to preserve the accurate current belief.`,
       assignment_type: 'contradiction_review',
@@ -88,8 +68,18 @@ export async function createContradictionReviewAssignments(
         suggested_action: warning.suggested_action,
         context_type: warning.entry_a.context_type,
       },
+    }, {
+      reviewKey: `contradiction:${key}`,
+      reasons: ['contradiction'],
+      contextEntryId: warning.entry_a.id,
+      contextType: warning.entry_a.context_type,
+      contradictionKey: key,
     });
-    assignments.push(assignment);
+    if (result.created) {
+      assignments.push(result.assignment);
+    } else {
+      skippedExisting++;
+    }
   }
 
   return { assignments, warnings, skipped_existing: skippedExisting };

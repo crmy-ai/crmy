@@ -454,6 +454,7 @@ export async function reviewContextEntry(
   tenantId: UUID,
   id: UUID,
   extendDays?: number,
+  groundingMethod: NonNullable<ContextEntry['grounding_method']> = 'human_reviewed',
 ): Promise<ContextEntry | null> {
   // Use a parameterized interval multiplication ($3 * INTERVAL '1 day') to
   // avoid any string interpolation in the query — safe even if extendDays is
@@ -462,23 +463,23 @@ export async function reviewContextEntry(
     const result = await db.query(
       `UPDATE context_entries
        SET reviewed_at = now(),
-           grounding_method = 'human_reviewed',
+           grounding_method = $4,
            valid_until = now() + ($3 * INTERVAL '1 day'),
            updated_at  = now()
        WHERE id = $1 AND tenant_id = $2
        RETURNING *`,
-      [id, tenantId, Math.max(1, Math.floor(Number(extendDays)))],
+      [id, tenantId, Math.max(1, Math.floor(Number(extendDays))), groundingMethod],
     );
     return (result.rows[0] as ContextEntry) ?? null;
   }
   const result = await db.query(
     `UPDATE context_entries
      SET reviewed_at = now(),
-         grounding_method = 'human_reviewed',
+         grounding_method = $3,
          updated_at = now()
      WHERE id = $1 AND tenant_id = $2
      RETURNING *`,
-    [id, tenantId],
+    [id, tenantId, groundingMethod],
   );
   return (result.rows[0] as ContextEntry) ?? null;
 }

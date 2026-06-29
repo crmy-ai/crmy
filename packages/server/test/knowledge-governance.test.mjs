@@ -245,6 +245,14 @@ class FakeGovDb {
         && (['stale', 'conflicting'].includes(x.status) || ['pending', 'unapproved'].includes(x.approval_status)));
       return { rows, rowCount: rows.length };
     }
+    if (t.startsWith("UPDATE assignments SET status = 'cancelled'")) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (t.startsWith('SELECT * FROM assignments WHERE tenant_id')) {
+      const knowledgeClaimId = params[4];
+      const assignment = this.assignments.find(a => a.metadata?.knowledge_claim_id === knowledgeClaimId);
+      return { rows: assignment ? [assignment] : [], rowCount: assignment ? 1 : 0 };
+    }
     if (t.startsWith('SELECT * FROM knowledge_claims WHERE') && t.includes("status NOT IN ('deprecated', 'rejected')")) {
       const rows = this.claims.filter(x => !['deprecated', 'rejected'].includes(x.status));
       return { rows, rowCount: rows.length };
@@ -269,8 +277,26 @@ class FakeGovDb {
       return { rows: [r], rowCount: 1 };
     }
     if (t.includes('INSERT INTO assignments')) {
-      this.assignments.push({ assigned_by: params[4], assigned_to: params[5], type: params[3] });
-      return { rows: [{ id: `asg-${this.assignments.length}` }], rowCount: 1 };
+      const assignment = {
+        id: `asg-${this.assignments.length + 1}`,
+        assigned_by: params[4],
+        assigned_to: params[5],
+        assignment_type: params[3],
+        metadata: JSON.parse(params[11]),
+        status: 'pending',
+      };
+      this.assignments.push(assignment);
+      return { rows: [assignment], rowCount: 1 };
+    }
+    if (t.startsWith('UPDATE assignments SET')) {
+      const assignment = this.assignments.find(a => a.id === params[1]);
+      if (!assignment) return { rows: [], rowCount: 0 };
+      for (const match of t.matchAll(/(priority|metadata) = \$(\d+)/g)) {
+        const field = match[1];
+        const value = params[Number(match[2]) - 1];
+        assignment[field] = field === 'metadata' ? JSON.parse(value) : value;
+      }
+      return { rows: [assignment], rowCount: 1 };
     }
     throw new Error(`unexpected query: ${t.slice(0, 90)}`);
   }

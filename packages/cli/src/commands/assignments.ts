@@ -58,6 +58,33 @@ export function assignmentsCommand(): Command {
       await client.close();
     });
 
+  cmd.command('review-queue')
+    .description('Show the ranked review queue')
+    .option('--mine', 'Show review assignments assigned to me')
+    .option('--assigned-to <actorId>', 'Filter by assignee actor ID')
+    .action(async (opts) => {
+      const client = await getClient();
+      const input: Record<string, unknown> = { limit: 20 };
+      if (opts.mine) input.mine = true;
+      if (opts.assignedTo) input.assigned_to = opts.assignedTo;
+      const result = await client.call('assignment_review_queue', input);
+      const data = JSON.parse(result);
+      if (data.assignments?.length === 0) {
+        console.log('No review assignments need attention.');
+        await client.close();
+        return;
+      }
+      console.table(data.assignments?.map((a: Record<string, unknown>) => ({
+        id: (a.id as string).slice(0, 8),
+        title: (a.title as string).slice(0, 44),
+        type: a.assignment_type,
+        priority: a.priority,
+        status: a.status,
+        subject: a.subject_type && a.subject_id ? `${a.subject_type}:${(a.subject_id as string).slice(0, 8)}` : '',
+      })));
+      await client.close();
+    });
+
   cmd.command('create')
     .description('Create a new assignment')
     .action(async () => {
@@ -122,6 +149,21 @@ export function assignmentsCommand(): Command {
       });
       const data = JSON.parse(result);
       console.log(`\n  Completed assignment: ${data.assignment.id}\n`);
+      await client.close();
+    });
+
+  cmd.command('resolve-review <id>')
+    .option('--extend-days <days>', 'Extend the Memory review window by this many days')
+    .description('Resolve a low-risk Memory review assignment')
+    .action(async (id, opts) => {
+      const client = await getClient();
+      const assignmentId = await resolveAssignmentId(client, id);
+      const result = await client.call('assignment_review_resolve', {
+        id: assignmentId,
+        extend_days: opts.extendDays ? Number(opts.extendDays) : undefined,
+      });
+      const data = JSON.parse(result);
+      console.log(`\n  Resolved review assignment: ${data.assignment.id}\n`);
       await client.close();
     });
 

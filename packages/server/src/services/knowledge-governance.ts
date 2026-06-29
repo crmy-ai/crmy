@@ -49,7 +49,7 @@ import {
   type ListKnowledgeClaimsOptions,
   type ReviewKnowledgeClaimPatch,
 } from '../db/repos/knowledge-claims.js';
-import { createAssignment } from '../db/repos/assignments.js';
+import { createOrConsolidateReviewAssignment, expireLowValueReviewAssignments } from './review-queue.js';
 
 const PRIORITY_RANK: Record<KnowledgeSourcePriority, number> = {
   authoritative: 3,
@@ -348,10 +348,11 @@ export async function processKnowledgeReviewsForTenant(
   tenantId: string,
   limit = 20,
 ): Promise<number> {
+  await expireLowValueReviewAssignments(db, tenantId);
   const claims = await listKnowledgeClaimsNeedingReviewAssignment(db, tenantId, limit);
   let created = 0;
   for (const claim of claims) {
-    await createAssignment(db, tenantId, {
+    const result = await createOrConsolidateReviewAssignment(db, tenantId, {
       title: `Review Trusted Fact: ${claim.category}`,
       description: `The Trusted Fact "${claim.title}" ${reviewReason(claim)}.`,
       assignment_type: 'knowledge_claim_review',
@@ -359,8 +360,12 @@ export async function processKnowledgeReviewsForTenant(
       assigned_to: claim.review_owner_id,
       priority: claim.status === 'conflicting' ? 'high' : 'normal',
       metadata: { knowledge_claim_id: claim.id, category: claim.category, claim_status: claim.status },
+    }, {
+      reviewKey: `knowledge_claim:${claim.id}`,
+      reasons: [claim.status === 'conflicting' ? 'knowledge_conflict' : 'knowledge_freshness'],
+      knowledgeClaimId: claim.id,
     });
-    created++;
+    if (result.created) created++;
   }
   return created;
 }
