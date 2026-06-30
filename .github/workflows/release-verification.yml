@@ -1,0 +1,26 @@
+# This workflow verifies a release after it is created.
+#
+# CRMy packages are published to the public npm registry as @crmy/* during the
+# release process. Do not publish them again from this GitHub Packages workflow:
+# the repository owner scope is crmy-ai, while the npm package scope is @crmy.
+
+name: Release Verification
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:cli-coverage
+      - run: npm audit --audit-level=moderate --omit=dev
