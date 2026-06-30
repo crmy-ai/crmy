@@ -842,7 +842,7 @@ test('high-volume context surfaces use stable timestamp plus id cursors', async 
 });
 
 test('live provider certification docs cover real OAuth provider behavior before production claims', async () => {
-  const certification = await readFile(new URL('../../../docs/provider-certification-0.9.4.md', import.meta.url), 'utf8');
+  const certification = await readFile(new URL('../../../docs/provider-certification-0.9.5.md', import.meta.url), 'utf8');
   const readme = await readFile(new URL('../../../README.md', import.meta.url), 'utf8');
   const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
 
@@ -863,8 +863,8 @@ test('live provider certification docs cover real OAuth provider behavior before
     assert.match(certification, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 
-  assert.match(readme, /provider-certification-0\.9\.4\.md/);
-  assert.match(guide, /provider-certification-0\.9\.4\.md/);
+  assert.match(readme, /provider-certification-0\.9\.5\.md/);
+  assert.match(guide, /provider-certification-0\.9\.5\.md/);
 });
 
 test('production database TLS requires verified certificates unless explicitly overridden', async () => {
@@ -5253,7 +5253,7 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   const schemasSource = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
 
   const releaseVersion = JSON.parse(rootPackage).version;
-  assert.equal(releaseVersion, '0.9.4');
+  assert.equal(releaseVersion, '0.9.5');
   for (const pkg of [sharedPackage, serverPackage, cliPackage, webPackage, openclawPackage]) {
     assert.equal(JSON.parse(pkg).version, releaseVersion);
   }
@@ -5262,8 +5262,9 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   assert.match(readme, new RegExp(`Current version: \`${releaseVersion}\``));
   assert.match(releaseNotes, new RegExp(`# CRMy v${releaseVersion}`));
   assert.match(changelog, new RegExp(`## \\[${releaseVersion}\\]`));
-  assert.match(releaseNotes, /AI briefing summaries now include approved Trusted Facts/);
-  assert.match(releaseNotes, /Knowledge Sources remains MCP-only/);
+  assert.match(releaseNotes, /Automatic Memory, Safely/);
+  assert.match(releaseNotes, /high_impact_autopromote_false_allow/);
+  assert.match(releaseNotes, /Settings -> Experimental/);
   assert.match(guide, /Governed Knowledge retrieval is also available/);
   assert.match(mcpDocs, /### knowledge_claim_review/);
   assert.match(mcpDocs, /### knowledge_conflicts_detect/);

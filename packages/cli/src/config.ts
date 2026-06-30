@@ -27,6 +27,23 @@ export const GLOBAL_CONFIG = path.join(CRMY_DIR, 'config.json');
 
 const AUTH_FILE = path.join(CRMY_DIR, 'auth.json');
 
+function normalizeConfig(config: CrmyConfig): CrmyConfig {
+  return {
+    ...config,
+    serverUrl: config.serverUrl?.trim(),
+    apiKey: config.apiKey?.trim(),
+    tenantId: config.tenantId?.trim(),
+    database: config.database
+      ? {
+        ...config.database,
+        url: config.database.url?.trim(),
+      }
+      : config.database,
+    jwtSecret: config.jwtSecret?.trim(),
+    encryptionKey: config.encryptionKey?.trim(),
+  };
+}
+
 /**
  * Load config — lookup order:
  *   1. explicitPath (passed via --config flag)
@@ -40,7 +57,7 @@ export function loadConfigFile(explicitPath?: string): CrmyConfig {
   // 1. Explicit path
   if (explicitPath) {
     try {
-      return JSON.parse(fs.readFileSync(explicitPath, 'utf-8')) as CrmyConfig;
+      return normalizeConfig(JSON.parse(fs.readFileSync(explicitPath, 'utf-8')) as CrmyConfig);
     } catch {
       return {};
     }
@@ -50,7 +67,7 @@ export function loadConfigFile(explicitPath?: string): CrmyConfig {
   const localPath = path.join(process.cwd(), '.crmy.json');
   if (fs.existsSync(localPath)) {
     try {
-      return JSON.parse(fs.readFileSync(localPath, 'utf-8')) as CrmyConfig;
+      return normalizeConfig(JSON.parse(fs.readFileSync(localPath, 'utf-8')) as CrmyConfig);
     } catch {
       // fall through to global
     }
@@ -58,7 +75,7 @@ export function loadConfigFile(explicitPath?: string): CrmyConfig {
 
   // 3. Global config
   try {
-    return JSON.parse(fs.readFileSync(GLOBAL_CONFIG, 'utf-8')) as CrmyConfig;
+    return normalizeConfig(JSON.parse(fs.readFileSync(GLOBAL_CONFIG, 'utf-8')) as CrmyConfig);
   } catch {
     return {};
   }

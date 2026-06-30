@@ -438,6 +438,8 @@ function CalendarConnectionCard({
   onDisconnect,
   syncing,
   connectionActionPending,
+  oauthReady,
+  isAdmin,
 }: {
   connection: Record<string, any>;
   onSync: (id: string) => void;
@@ -446,14 +448,25 @@ function CalendarConnectionCard({
   onDisconnect: (connection: Record<string, any>) => void;
   syncing: boolean;
   connectionActionPending?: boolean;
+  oauthReady?: Record<'google' | 'microsoft', boolean>;
+  isAdmin?: boolean;
 }) {
   const connected = connection.status === 'connected';
   const paused = connection.status === 'disconnected';
   const canToggle = connected || paused;
-  const provider = CALENDAR_PROVIDER_COPY[connection.provider as CalendarProvider] ?? CALENDAR_PROVIDER_COPY.google;
+  const providerKey = connection.provider as CalendarProvider;
+  const provider = CALENDAR_PROVIDER_COPY[providerKey] ?? CALENDAR_PROVIDER_COPY.google;
+  const providerReady = oauthReady?.[providerKey];
   const status = connectionCopy[connection.status] ?? connectionCopy.configuration_required;
   const statusLabel = connected ? `Connected as ${connection.email_address}` : paused ? 'Paused' : status.label === 'Setup needed' ? 'Waiting for admin OAuth setup' : status.label;
   const statusClassName = paused ? STATUS_TONES.muted : status.className;
+  const canShowSetupAction = !connected && !paused;
+  const setupActionLabel = providerReady === true
+    ? 'Continue setup'
+    : providerReady === false
+      ? (isAdmin ? 'Open Context Connectors' : 'Update request')
+      : 'Checking setup';
+  const setupActionDisabled = providerReady === undefined;
   const scope = connection.settings?.meeting_ingest_scope as MeetingIngestScope | undefined;
   const scopeLabel = scope === 'all_meetings'
     ? 'All external meetings'
@@ -476,9 +489,9 @@ function CalendarConnectionCard({
             <Button variant="outline" size="sm" onClick={() => onSync(connection.id)} disabled={syncing} className="gap-1.5">
               <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} /> Sync
             </Button>
-          ) : !paused ? (
-            <Button variant="outline" size="sm" onClick={() => onSetup(connection.provider as CalendarProvider, connection)} className="gap-1.5">
-              <SlidersHorizontal className="h-3.5 w-3.5" /> Setup guide
+          ) : canShowSetupAction ? (
+            <Button variant="outline" size="sm" disabled={setupActionDisabled} onClick={() => onSetup(providerKey, connection)} className="gap-1.5">
+              <SlidersHorizontal className="h-3.5 w-3.5" /> {setupActionLabel}
             </Button>
           ) : null}
           {canToggle && (
@@ -526,10 +539,12 @@ function CalendarConnectionCard({
         </div>
         {paused ? (
           <p>Paused. CRMy is not reading this calendar for customer meeting context or availability.</p>
+        ) : !connected && providerReady === true ? (
+          <p>Provider setup is ready. Continue setup to connect this calendar with OAuth.</p>
+        ) : !connected && providerReady === false ? (
+          <p>An admin needs to configure {provider.credentialLabel} before live calendar sync can run.</p>
         ) : !connected && (
-          <p>
-            Live sync is waiting for provider setup. The guide shows calendar scope, customer meeting filtering, and OAuth steps.
-          </p>
+          <p>Checking provider OAuth readiness before showing calendar setup.</p>
         )}
         {connection.last_sync_at
           ? <p>{`Last sync ${new Date(connection.last_sync_at).toLocaleString()}`}</p>
@@ -563,8 +578,8 @@ function CalendarConnectionsPanel({
   isAdmin?: boolean;
 }) {
   const providers = [
-    { provider: 'google' as const, title: oauthReady?.google === false ? 'Request Google Calendar setup' : 'Connect Google Calendar', description: 'Connect Google Workspace meeting context for customer activity capture.' },
-    { provider: 'microsoft' as const, title: oauthReady?.microsoft === false ? 'Request Outlook Calendar setup' : 'Connect Outlook Calendar', description: 'Connect Microsoft 365 meeting context for customer activity capture.' },
+    { provider: 'google' as const, label: 'Google Calendar', description: 'Connect Google Workspace meeting context for customer activity capture.' },
+    { provider: 'microsoft' as const, label: 'Outlook Calendar', description: 'Connect Microsoft 365 meeting context for customer activity capture.' },
   ];
 
   return (
@@ -586,18 +601,32 @@ function CalendarConnectionsPanel({
 
       <div className="grid gap-3 md:grid-cols-2">
         {providers.map((provider) => {
+          const ready = oauthReady?.[provider.provider];
+          const title = ready === true
+            ? `Connect ${provider.label}`
+            : ready === false
+              ? (isAdmin ? `Set up ${provider.label} OAuth` : `Request ${provider.label} setup`)
+              : `Checking ${provider.label} setup`;
+          const actionLabel = ready === true
+            ? 'Connect calendar'
+            : ready === false
+              ? (isAdmin ? 'Open Context Connectors' : 'Request admin setup')
+              : 'Checking setup';
           return (
             <button
               key={provider.provider}
               type="button"
+              disabled={ready === undefined}
               onClick={() => onSetup(provider.provider)}
-              className="rounded-xl border border-border bg-card/70 p-4 text-left hover:bg-muted/35"
+              className={`rounded-xl border border-border bg-card/70 p-4 text-left transition-colors ${
+                ready === undefined ? 'cursor-not-allowed opacity-60' : 'hover:bg-muted/35'
+              }`}
             >
               <CalendarClock className="h-5 w-5 text-blue-300" />
-              <h3 className="mt-3 text-sm font-semibold text-foreground">{provider.title}</h3>
+              <h3 className="mt-3 text-sm font-semibold text-foreground">{title}</h3>
               <p className="mt-1 text-sm text-muted-foreground">{provider.description}</p>
               <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-blue-300">
-                {oauthReady?.[provider.provider] === true ? 'Connect calendar' : oauthReady?.[provider.provider] === false ? (isAdmin ? 'Open setup guide' : 'Request admin setup') : 'Open setup guide'} <ArrowRight className="h-3 w-3" />
+                {actionLabel} {ready !== undefined && <ArrowRight className="h-3 w-3" />}
               </span>
             </button>
           );
@@ -619,6 +648,8 @@ function CalendarConnectionsPanel({
             onDisconnect={onDisconnect}
             syncing={syncingId === connection.id}
             connectionActionPending={connectionActionPending}
+            oauthReady={oauthReady}
+            isAdmin={isAdmin}
           />
         ))}
       </div>
@@ -1200,6 +1231,8 @@ export default function Activities() {
   const [setupEmail, setSetupEmail] = useState('');
   const [setupDisplayName, setSetupDisplayName] = useState('');
   const [setupMeetingScope, setSetupMeetingScope] = useState<MeetingIngestScope>('owned_accounts');
+  const [requestProvider, setRequestProvider] = useState<CalendarProvider | null>(null);
+  const [requestEmail, setRequestEmail] = useState('');
   const [debriefActivity, setDebriefActivity] = useState<Record<string, any> | null>(null);
   const [debriefText, setDebriefText] = useState('');
   const [page, setPage] = useState(1);
@@ -1336,14 +1369,44 @@ export default function Activities() {
   };
 
   const setupCopy = setupProvider ? CALENDAR_PROVIDER_COPY[setupProvider] : null;
+  const requestCopy = requestProvider ? CALENDAR_PROVIDER_COPY[requestProvider] : null;
   const setupSaving = startGoogle.isPending || startMicrosoft.isPending;
 
-  const openSetup = (provider: CalendarProvider, connection?: Record<string, any>) => {
+  const openFullSetup = (provider: CalendarProvider, connection?: Record<string, any>) => {
     setSetupProvider(provider);
     setSetupStep(0);
     setSetupEmail(String(connection?.email_address ?? ''));
     setSetupDisplayName(String(connection?.display_name ?? ''));
     setSetupMeetingScope(connection?.settings?.meeting_ingest_scope ?? 'owned_accounts');
+  };
+
+  const openRequestSetup = (provider: CalendarProvider, connection?: Record<string, any>) => {
+    setRequestProvider(provider);
+    setRequestEmail(String(connection?.email_address ?? ''));
+  };
+
+  const openCalendarSetup = (provider: CalendarProvider, connection?: Record<string, any>) => {
+    const ready = oauthReady?.[provider];
+    if (ready === true) {
+      openFullSetup(provider, connection);
+      return;
+    }
+    if (ready === false) {
+      if (isAdmin) {
+        toast({
+          title: 'OAuth setup required',
+          description: `${CALENDAR_PROVIDER_COPY[provider].label} must be configured in Context Connectors before users can connect calendars.`,
+        });
+        navigate('/settings/connections');
+        return;
+      }
+      openRequestSetup(provider, connection);
+      return;
+    }
+    toast({
+      title: 'Checking provider setup',
+      description: 'Wait for CRMy to finish checking OAuth readiness before continuing.',
+    });
   };
 
   const closeSetup = () => {
@@ -1352,6 +1415,11 @@ export default function Activities() {
     setSetupEmail('');
     setSetupDisplayName('');
     setSetupMeetingScope('owned_accounts');
+  };
+
+  const closeRequestSetup = () => {
+    setRequestProvider(null);
+    setRequestEmail('');
   };
 
   const toggleCalendarActive = (connection: Record<string, any>, active: boolean) => {
@@ -1389,6 +1457,15 @@ export default function Activities() {
 
   const saveCalendarSetup = async () => {
     if (!setupProvider) return;
+    if (!selectedProviderReady) {
+      if (isAdmin) {
+        navigate('/settings/connections');
+      } else {
+        openRequestSetup(setupProvider, { email_address: setupEmail });
+      }
+      closeSetup();
+      return;
+    }
     if (!setupEmail.trim().includes('@')) {
       toast({ title: 'Calendar email required', description: 'Enter a valid calendar email before saving setup.', variant: 'destructive' });
       return;
@@ -1413,6 +1490,31 @@ export default function Activities() {
       if (isAdmin) navigate('/settings/connections');
     } catch (err) {
       toast({ title: 'Calendar setup failed', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
+    }
+  };
+
+  const saveCalendarSetupRequest = async () => {
+    if (!requestProvider) return;
+    if (!requestEmail.trim().includes('@')) {
+      toast({ title: 'Calendar email required', description: 'Enter the Google or Outlook calendar you want CRMy to watch.', variant: 'destructive' });
+      return;
+    }
+    try {
+      const result = await (requestProvider === 'google' ? startGoogle : startMicrosoft).mutateAsync({
+        email_address: requestEmail.trim().toLowerCase(),
+      }) as any;
+      if (result?.auth_url) {
+        window.location.assign(result.auth_url);
+        return;
+      }
+      toast({
+        title: 'Admin setup requested',
+        description: `${CALENDAR_PROVIDER_COPY[requestProvider].label} is waiting for an admin to configure OAuth before live sync can run.`,
+      });
+      setActivityTab('meeting_sources');
+      closeRequestSetup();
+    } catch (err) {
+      toast({ title: 'Calendar setup request failed', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
     }
   };
 
@@ -1553,7 +1655,7 @@ export default function Activities() {
             <CalendarConnectionsPanel
               connections={connections}
               summary={connectionsQ.data?.summary}
-              onSetup={openSetup}
+              onSetup={openCalendarSetup}
               onSync={(id) => syncConnection.mutate(id, { onSuccess: () => toast({ title: 'Calendar sync queued' }) })}
               onToggleActive={toggleCalendarActive}
               onDisconnect={disconnectCalendar}
@@ -1648,6 +1750,44 @@ export default function Activities() {
           </div>
         )}
       </div>
+
+      <Dialog open={Boolean(requestProvider)} onOpenChange={(open) => { if (!open) closeRequestSetup(); }}>
+        {requestProvider && requestCopy && (
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <CalendarClock className="h-5 w-5 text-blue-500" /> Request {requestCopy.label} setup
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 p-4">
+                <p className="text-sm font-semibold text-foreground">Admin setup needed</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Your workspace admin needs to configure {requestCopy.credentialLabel} before CRMy can connect this calendar or run live sync.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Calendar email</label>
+                <Input
+                  value={requestEmail}
+                  onChange={event => setRequestEmail(event.target.value)}
+                  placeholder="seller@company.com"
+                />
+                <p className="text-xs text-muted-foreground">
+                  CRMy will record this request so an admin can finish provider setup. No calendar data is read until OAuth is configured and connected.
+                </p>
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={closeRequestSetup}>Cancel</Button>
+              <Button onClick={saveCalendarSetupRequest} disabled={setupSaving} className="gap-1.5 bg-blue-600 text-white hover:bg-blue-500">
+                {setupSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Request admin setup
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
 
       <Dialog open={Boolean(setupProvider)} onOpenChange={(open) => { if (!open) closeSetup(); }}>
         {setupProvider && setupCopy && (

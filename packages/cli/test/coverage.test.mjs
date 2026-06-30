@@ -585,6 +585,8 @@ test('first-run setup persists a dedicated stored-secret encryption key', async 
   const guide = await read('docs/guide.md');
 
   assert.match(configSource, /encryptionKey\?: string/);
+  assert.match(configSource, /function normalizeConfig/);
+  assert.match(configSource, /url: config\.database\.url\?\.trim\(\)/);
   assert.match(configSource, /fs\.writeFileSync\(localPath, json, \{ mode: 0o600 \}\)/);
   assert.match(configCommandSource, /encryptionKey: config\.encryptionKey \? '\*\*\*' : undefined/);
   assert.match(initSource, /encryptionKey = crypto\.randomBytes\(32\)\.toString\('hex'\)/);

@@ -15,7 +15,7 @@ CRMy should stay lifecycle-first. New features should make it easier to understa
 | **Handoffs** | Human decisions for risky, uncertain, delegated, or externally impactful work: approve, reject, reassign, complete, and inspect decision packets. | General task management, or low-risk agent work that only needs context and warnings. |
 | **Workspace Agent** | Scoped GTM workbench, Active Context, tool work, draft assistance, record-bound questions. | Admin configuration, unrestricted record access, silent writes. |
 | **Settings** | Workspace configuration, profile, model setup, systems of record, registries, policies, source filters. | Daily seller/customer-success workflow. |
-| **Settings → Automation Experiments** | Experimental action rules and sequences for controlled validation of governed automation patterns. | First-run onboarding, primary user navigation, or production-critical action paths. |
+| **Settings → Experimental → Automations** | Experimental action rules and sequences for controlled validation of governed automation patterns. | First-run onboarding, primary user navigation, or production-critical action paths. |
 | **Reliability / Audit Log** | Admin/operator evidence, recovery, data quality, immutable receipts. | Member-facing daily work. |
 
 ## Lifecycle Rules

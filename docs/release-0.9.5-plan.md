@@ -6,7 +6,10 @@ WS1 checkpoint implemented; WS2, WS3, WS4, WS5, WS6, and WS7 implemented in stac
 checkpoints. Release-acceptance documentation cleanup is implemented: the roadmap,
 guide, MCP tool docs, and eval harness now describe the real customer-Memory
 freshness mechanism, tenant-tunable type settings, and seeded connector parity
-without treating them as future work. This is the next milestone after 0.9.4 and
+without treating them as future work. Final pre-release hardening is complete:
+workspace package versions, OpenAPI metadata, README, changelog, release notes,
+provider certification checklist, packaged web assets, and local CLI/MCP smoke
+checks now align to 0.9.5. This is the next milestone after 0.9.4 and
 the largest single step
 toward a 1.0 production release. It is the
 authoritative development plan for 0.9.5; the

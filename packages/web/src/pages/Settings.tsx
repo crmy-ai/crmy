@@ -39,10 +39,10 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Tags,       label: 'Memory Types',  path: '/settings/registries',   roles: ['admin', 'owner'], group: 'Advanced' },
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'], group: 'Advanced' },
   { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'], group: 'Advanced' },
-  { icon: Zap,        label: 'Automation Experiments', path: '/settings/advanced', roles: ['admin', 'owner'], group: 'Advanced' },
+  { icon: Zap,        label: 'Automations',    path: '/settings/advanced',     roles: ['admin', 'owner'], group: 'Experimental' },
 ];
 
-const settingsGroupOrder = ['Personal', 'Setup', 'Sources', 'Safety', 'Advanced'];
+const settingsGroupOrder = ['Personal', 'Setup', 'Sources', 'Safety', 'Advanced', 'Experimental'];
 const SETTINGS_SETUP_PATH_HIDDEN_KEY = 'crmy_settings_setup_path_hidden';
 
 function AccessDenied() {

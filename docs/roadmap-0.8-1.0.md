@@ -120,7 +120,7 @@ Everything beyond this loop (SoR connectors, email/calendar sources, Trusted Fac
 
 **Sequences - experimental:**
 1. Keep `sequence_*` MCP tools outside default toolsets unless an operator explicitly enables the experimental/full catalog.
-2. Keep Sequences out of primary nav and the demo/quickstart path. Place UI behind **Settings -> Automation Experiments**.
+2. Keep Sequences out of primary nav and the demo/quickstart path. Place UI behind **Settings -> Experimental -> Automations**.
 3. Strip sales-engagement positioning from README, guide, recipes, and examples.
 4. Freeze broad feature expansion. Keep durable execution and regression tests for existing functionality.
 5. Remove sequence-specific acceptance criteria from the 1.0 core gate unless tied to Action Context proof.
@@ -136,12 +136,12 @@ Everything beyond this loop (SoR connectors, email/calendar sources, Trusted Fac
 
 ### Focused Road to 1.0 (phased)
 
-Current release: **0.9.4 (shipped).** Each phase maps to a differentiated mechanism and has a hard acceptance gate. 0.9.6–0.9.8 walk into the 1.0 release candidate, so the dot releases are sequenced deliberately.
+Current release: **0.9.5 (release candidate).** Each phase maps to a differentiated mechanism and has a hard acceptance gate. 0.9.6–0.9.8 walk into the 1.0 release candidate, so the dot releases are sequenced deliberately.
 
 | Phase | Theme | Deliverables (grounded in existing code) | Acceptance gate |
 |---|---|---|---|
 | **0.9.4** ✅ **LANDED** | **Trust integrity** (make the headline claims true) | D3 claim-class tiers in `memory-trust.ts`; `grounding_method` on every Memory row (migration 090); **customer-Memory decay windows** (`memoryFreshnessWindowDays` + write-time review dates + undated sweep); D4 model-certification gate for auto-promote (migration 091) | ✅ Verified in code: tier + certification gates fire on the auto-promote path; un-dated Memory auto-stales by type. **Known follow-up surfaced for 0.9.5:** no automated certification path exists, so production auto-promote is effectively off → handled by 0.9.5 WS1. |
-| **0.9.5** | **Automatic by default** (the big milestone) | See the full **[0.9.5 Development Plan](release-0.9.5-plan.md)**. WS1 eval-driven certification + pre-certified models (fixes the auto-promote dead-end); WS2 self-maintaining review queue; WS3 headless auto-ingestion + reduce-UI audit; WS4 tenant-tunable tiers/freshness (calibration); WS5 Core Profile default + finish Sequences/Automations removal; WS6 versioned Action Context contract (D1/D6); WS7 neutrality-by-construction + parity harness (D2) | Fresh `init --demo` auto-confirms Tier-0/1 grounded Memory with **zero clicks**; golden path needs **zero web-UI interaction**; re-grounding clears reviews; Tier-2 false-allow = 0; contract versioned |
+| **0.9.5** ✅ **RC** | **Automatic by default** (the big milestone) | See the full **[0.9.5 Development Plan](release-0.9.5-plan.md)**. WS1 eval-driven certification + pre-certified models (fixes the auto-promote dead-end); WS2 self-maintaining review queue; WS3 headless auto-ingestion + reduce-UI audit; WS4 tenant-tunable tiers/freshness (calibration); WS5 Core Profile default + finish Sequences/Automations removal; WS6 versioned Action Context contract (D1/D6); WS7 neutrality-by-construction + parity harness (D2) | Fresh `init --demo` auto-confirms Tier-0/1 grounded Memory with **zero clicks**; golden path needs **zero web-UI interaction**; re-grounding clears reviews; Tier-2 false-allow = 0; contract versioned |
 | **0.9.6** | **Proof receipts + runtime hardening** | Extend the frozen Action Context contract into a universal proof-receipt envelope across retrieval/draft/HITL/writeback/turn; harden cross-surface runtime behavior around the core loop | One receipt format audits all action types; contract consumers stay stable across MCP/REST/CLI/Workspace Agent |
 | **0.9.7** | **Neutrality + the value proof** | D7 **live** two-SoR + connector-free parity (Salesforce + HubSpot); **public benchmark vs naive RAG / model-native memory** (grounded-claim, unsupported-claim, stale-avoidance, unsafe-writeback); D5 outcome-instrumentation substrate (data capture only) | Canonical flow passes identically across SF, HubSpot, and no-connector; benchmark shows measurable safety/accuracy lift over alternatives |
 | **0.9.8** | **Pre-RC hardening** | [Resilience At Scale](#10-resilience-at-scale) **scoped to the core loop** (serverless Postgres budgets, durable sweep queues, scoped search at volume); runtime certification matrix for the 5-tool loop | Review queue + sweeps stay bounded at 500k-row tenants; core loop meets latency/correctness budgets |
@@ -770,7 +770,7 @@ Key cleanup changes:
 
 - Keep primary member/manager navigation focused on Overview, customer records, Context, Handoffs, and Workspace Agent.
 - Move Customer Email and Customer Activity into a Context `Sources` surface or clearly frame them as source feeds.
-- Move Automations, Sequences, Webhooks, and manual writeback testing into Settings -> Automation Experiments or other admin-only settings surfaces.
+- Move Automations, Sequences, Webhooks, and manual writeback testing into Settings -> Experimental -> Automations or other admin-only settings surfaces.
 - Keep Context tabs centered on Sources, Signals, Memory, and Lineage. Keep Graph secondary.
 - Make record drawers the main customer action hub: Ask Agent, Update with Agent, Generate Brief, Add Context, Draft Email, Log Activity, Review Signals, and View Lineage.
 - Reorganize Settings around Workspace, Agent, Sources, Systems, Governance, Operations, and Advanced.
@@ -787,7 +787,7 @@ Language cleanup:
 
 Implementation order:
 
-1. **Navigation cleanup:** move Email and Activities out of primary nav; move Automations and Sequences to Settings -> Automation Experiments; keep routes compatible.
+1. **Navigation cleanup:** move Email and Activities out of primary nav; move Automations and Sequences to Settings -> Experimental -> Automations; keep routes compatible.
 2. **Context simplification:** add a Sources surface, demote Graph, and keep Sources / Signals / Memory / Lineage as the main Context path.
 3. **Settings consolidation:** group admin setup by outcome and hide admin-only areas from non-admins.
 4. **Workflow polish:** make Overview and record drawers surface source issues, Signals, Handoffs, stale Memory, and missing context as work to do.

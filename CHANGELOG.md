@@ -10,6 +10,25 @@ No unreleased changes yet.
 
 ---
 
+## [0.9.5] - 2026-06-29
+
+### Added
+
+- Added eval-driven model certification through `crmy certify`, with certification writes allowed only from passing `live_model` eval evidence or recorded CRMy pre-certification provenance.
+- Added a deterministic high-impact Tier-2 auto-promotion eval gate in the `seeded_context` profile, including `high_impact_autopromote_false_allow = 0`.
+- Added guided first-run certification copy and review-only fallback for uncertified models, while pre-certified exact model/provider matches restore recorded certification automatically.
+- Added tenant-tunable Memory tier and freshness controls, versioned Action Context response metadata, and deterministic connector-parity coverage.
+
+### Changed
+
+- Made automatic Memory the recommended safe path for pre-certified models while keeping uncertified/local models in review-only mode until certification passes.
+- Tightened Knowledge, Signals, Memory, Handoffs, Meeting Sources, Settings, Overview, and login UI consistency for the 0.9.5 backend workflows.
+- Reframed docs around provenance-checked, decay-aware governance instead of "truth layer" or knowledge-graph claims.
+- Moved Automations under Settings -> Experimental -> Automations and kept Sequences/Automations outside the default Core Profile path.
+- Updated package, OpenAPI, README, guide, release-note, and packaged web asset metadata for 0.9.5.
+
+---
+
 ## [0.9.4] - 2026-06-28
 
 ### Changed

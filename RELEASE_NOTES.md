@@ -1,52 +1,45 @@
-# CRMy v0.9.4
+# CRMy v0.9.5
 
-CRMy v0.9.4 is a production-readiness hardening release for governed customer context. It tightens browser and API-key trust boundaries, aligns agent-facing briefings with Trusted Facts, narrows Knowledge Source setup to MCP, and marks automation and sequence surfaces as controlled experiments.
+CRMy v0.9.5 is the "Automatic by Default" release. It makes 0.9.4's trust machinery usable out of the gate: grounded Signals can become Memory automatically when the model is certified, evidence is fresh, and policy says the claim is safe.
 
-This release keeps the central loop intact: messy customer context and approved Trusted Facts stay governed, Signals remain evidence-backed, Memory is promoted only when grounded and ready, and agents get compact Action Context before acting.
+This release keeps the promise honest. CRMy is not a truth layer and it is not a generic knowledge graph. It is a provenance-checked, decay-aware governance layer for customer-facing agents: raw context comes in, CRMy grades what can be trusted, gates what agents can do, and records proof for every decision.
 
 ## Release Focus
 
-v0.9.4 focuses on trust-boundary cleanup, surface consistency, and operator confidence:
+v0.9.5 focuses on safe automation:
 
-- require same-origin browser cookie mutations, stronger connector/admin scopes, safer file-ingest defaults, and production-safe MCP Knowledge connector endpoint policies;
-- include Trusted Facts in AI briefing summaries when configured;
-- keep model auto-promotion blocked unless certification evidence satisfies the release gate;
-- add Memory freshness indexes for dated and undated review sweeps;
-- mark Automations and Sequences as experimental admin surfaces, not the default CRMy path;
-- improve contact detail clarity by labeling the contact score as Lead score;
-- refresh package versions, OpenAPI, README, guide, release notes, packaged web assets, and release tests for 0.9.4.
+- certify models through eval evidence, not manual self-assertion;
+- ship exact-match pre-certified recommendations for a zero-click automatic demo path;
+- keep arbitrary/local models in guided review-only mode until `crmy certify` passes;
+- add a release-blocking Tier-2 high-impact auto-promotion eval gate with false-allow fixed at 0;
+- make review queues, stale Memory, source drops, Action Context, and connector parity easier to operate without UI-only steps;
+- keep Automations and Sequences under Settings -> Experimental, outside the default Core Profile path.
 
 ## Highlights
 
-### Trust Boundary Hardening
+### Automatic Memory, Safely
 
-- Cookie-authenticated browser requests that change data must now come from the CRMy origin. `CRMY_PUBLIC_URL` is honored for proxied deployments.
-- Agent settings now require the dedicated `agent:admin` scope in addition to admin or owner role.
-- Knowledge Source and Context Connector settings now require explicit systems scopes, and Knowledge sync also requires `knowledge:write`.
-- File extraction preview now requires `context:write`, and full extracted text is returned only when callers explicitly request `include_text`.
-- MCP Knowledge connector endpoints block localhost, link-local, and private-network targets by default. Self-hosted deployments can opt in with `CRMY_ALLOW_PRIVATE_MCP_CONNECTORS=true`.
+- `crmy certify` now runs the real `live_model` certification suite and writes `certified` only when the eval gate passes.
+- Recommended pre-certified provider/model selections restore recorded CRMy certification provenance automatically.
+- Uncertified models get a clear guided path: certify the model to turn on automatic Memory, or continue in review-only mode.
+- Tier-2 auto-promotion is governed by policy and requires independent corroboration, recency, grounding, readiness, and confidence.
 
-### Trusted Facts And Briefings
+### Release-Blocking Trust Evals
 
-- AI briefing summaries now include approved Trusted Facts when configured, instead of quietly omitting the governed knowledge layer.
-- Knowledge Sources remains MCP-only for this release. Unsupported web, drive, and generic source placeholders are intentionally absent.
-- Trusted Facts remain separate from customer Memory and are included only when approval, grounding, freshness, visibility, and customer-safety policy allow it.
+- The `seeded_context` profile now includes `high_impact_autopromote`.
+- `high_impact_autopromote_false_allow` must remain `0`.
+- The suite covers single-source, duplicate-source, stale, ungrounded, conflict/readiness-blocked, `human_only`, and allowed independent-corroboration cases.
 
-### Memory And Model Trust
+### Operator And Agent Surfaces
 
-- Production settings no longer allow operators to manually mark a model as certified. Certification must come from the eval certification path before auto-promotion can rely on it.
-- New Memory freshness indexes support active Memory review sweeps without forcing table scans as tenants grow.
-- The trust integrity migrations for Memory claim tiers, grounding method, model certification fields, and freshness indexes are included in the 0.9.4 path.
-
-### Product Surface Cleanup
-
-- Automations and Sequences are now labeled as experimental admin surfaces in UI and documentation. They are not part of the default Core Profile or first-run path.
-- Settings now uses the clearer Automation Experiments label.
-- Contact detail views now label contact scoring as Lead score with an icon, reducing confusion with account or deal health.
+- Knowledge, Signals, Memory, Handoffs, Meeting Sources, Settings, Overview, and login UI were tightened for a more consistent backend-operator experience.
+- Meeting Sources now treats Google and Outlook readiness consistently: users request admin setup when OAuth is not ready; admins go to Context Connectors.
+- Action Context responses are versioned and carry more explicit contract metadata.
+- Deterministic connector parity coverage proves that core behavior is neutral across mocked systems of record.
 
 ### Release Metadata And Packaging
 
-- All workspace packages, package lock metadata, OpenAPI, README, release notes, and changelog now identify `0.9.4`.
+- All workspace packages, package lock metadata, OpenAPI, README, release notes, and changelog identify `0.9.5`.
 - The packaged server web assets were rebuilt after the UI polish.
 - The OpenAPI artifact was regenerated from source.
 
@@ -54,12 +47,12 @@ v0.9.4 focuses on trust-boundary cleanup, surface consistency, and operator conf
 
 Publish candidates:
 
-- `@crmy/core@0.9.4`
-- `@crmy/shared@0.9.4`
-- `@crmy/server@0.9.4`
-- `@crmy/web@0.9.4`
-- `@crmy/cli@0.9.4`
-- `@crmy/openclaw-plugin@0.9.4`
+- `@crmy/core@0.9.5`
+- `@crmy/shared@0.9.5`
+- `@crmy/server@0.9.5`
+- `@crmy/web@0.9.5`
+- `@crmy/cli@0.9.5`
+- `@crmy/openclaw-plugin@0.9.5`
 
 ## Quick Validation
 
@@ -69,7 +62,7 @@ For a fresh local demo:
 npx -y @crmy/cli init --demo
 npx -y @crmy/cli quickstart
 npx -y @crmy/cli doctor
-npx -y @crmy/cli eval run
+npx -y @crmy/cli eval run --profile seeded_context
 npx -y @crmy/cli agent-smoke
 npx -y @crmy/cli briefing "account:Northstar Labs"
 npx -y @crmy/cli action-context "account:Northstar Labs" --action customer_outreach
@@ -81,18 +74,17 @@ Before release:
 
 - `npm audit --audit-level=moderate --omit=dev` found 0 vulnerabilities.
 - `npm run lint` passed.
-- `npm test` passed, 163/163.
-- `npm run test:cli-coverage` passed, 23/23.
-- `node --test packages/server/test/*.test.mjs` passed, 231/231 with 1 expected integration skip when no DB env is set.
-- `npm run test:integration:local --workspace=packages/server` passed, 6/6 against the migrated local app database. `022_pgvector.sql` was skipped because `ENABLE_PGVECTOR=true` was not set.
-- `npm run test:ui-smoke` passed against `http://localhost:3000/app/`.
 - `npm run build` passed.
+- `npm test` passed, 169/169.
+- `npm run test:cli-coverage` passed, 24/24.
+- `npm run test:ui-smoke` passed against `http://localhost:3000/app/`.
 - `npm run generate:openapi --workspace=packages/server` passed.
+- `crmy eval run --profile seeded_context`, `contract`, and `agent_runtime` passed.
 
 ## Notes And Caveats
 
 - Live Gmail, Outlook, Google Calendar, Microsoft Calendar, HubSpot, Salesforce, and warehouse connector certification remains environment-dependent and should be run before production provider claims.
-- The provider certification checklist is now explicit for Google/Microsoft OAuth app sources, but those live-provider tests cannot be completed without sandbox or production provider accounts.
+- Live `crmy certify` requires real provider credentials and model spend; local deterministic eval gates run without those credentials.
 - Trusted Facts are optional. They do not create customer Memory and should remain customer-facing only when approved, grounded, fresh, and externally safe.
 - Global REST/MCP/agent quotas and SaaS-scale rate limiting remain post-0.9 work.
 

@@ -716,7 +716,7 @@ Admin/owner surface for governed company, product, pricing, implementation, secu
 Role-aware settings:
 - **Profile**: name, email, role, and personal appearance preferences
 - **API Keys**: create new keys (shown once), list existing, revoke
-- **Admin-only setup**: Model Settings, Systems of Record, source filters, Actors, Webhooks, Custom Fields, Registries, Action Policies, Automation Experiments, Reliability, and Audit Log
+- **Admin-only setup**: Model Settings, Systems of Record, source filters, Actors, Webhooks, Custom Fields, Registries, Action Policies, Experimental Automations, Reliability, and Audit Log
 - **Tenant identity**: read-only workspace/tenant details for admins
 
 #### Workspace Agent settings (`/app/settings/model`)
@@ -2236,7 +2236,7 @@ GET    /api/v1/analytics/use-cases?group_by=stage
 
 Event-driven automation is available as an experimental admin surface. Workflows trigger on CRMy events and execute governed actions, but they are not part of the default product path.
 
-This is an admin capability, now reached from **Settings → Automation Experiments** or the compatible `/app/automations` route. It should not be part of the first-run user path or a production-critical action path until a team validates the rules in its own workspace. Most users should start from Overview, Context, Handoffs, customer records, and Workspace Agent before testing action rules or sequences.
+This is an admin capability, now reached from **Settings → Experimental → Automations** or the compatible `/app/automations` route. It should not be part of the first-run user path or a production-critical action path until a team validates the rules in its own workspace. Most users should start from Overview, Context, Handoffs, customer records, and Workspace Agent before testing action rules or sequences.
 
 ### Trigger events
 
@@ -2536,7 +2536,7 @@ Troubleshooting:
 - **Connected context-only but now needs send/drafts:** reauthorize the mailbox from **Mailboxes & Senders** with the send or provider-draft toggle enabled.
 - **Who has connected mail/calendar:** admins can review mailbox, sender, and calendar coverage badges and expanded details in **Settings -> Actors**, including connected email, connection date, last sync, latest message/event, processed volume, Sources, Signals, Memory, and latest issue.
 
-Before enabling live provider support for a production tenant, run the [provider certification checklist](provider-certification-0.9.4.md). Automated tests verify CRMy behavior; the certification checklist verifies real Google/Microsoft consent, sync, draft, send, reply, calendar, free/busy, and failure behavior for each OAuth app source.
+Before enabling live provider support for a production tenant, run the [provider certification checklist](provider-certification-0.9.5.md). Automated tests verify CRMy behavior; the certification checklist verifies real Google/Microsoft consent, sync, draft, send, reply, calendar, free/busy, and failure behavior for each OAuth app source.
 
 Requested scopes:
 
