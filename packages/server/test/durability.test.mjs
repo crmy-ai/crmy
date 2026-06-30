@@ -5281,6 +5281,8 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
 
   assert.match(releaseWorkflow, /release:\s*[\s\S]*types: \[created\]/);
   assert.match(releaseWorkflow, /workflow_dispatch:/);
+  assert.match(releaseWorkflow, /actions\/checkout@v5/);
+  assert.match(releaseWorkflow, /actions\/setup-node@v5/);
   assert.match(releaseWorkflow, /node-version: 24/);
   assert.match(releaseWorkflow, /npm run lint/);
   assert.match(releaseWorkflow, /npm run build/);
