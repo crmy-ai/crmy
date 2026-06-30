@@ -5229,7 +5229,7 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   const openapiArtifact = await readFile(new URL('../../../docs/openapi.json', import.meta.url), 'utf8');
   const releaseNotes = await readFile(new URL('../../../RELEASE_NOTES.md', import.meta.url), 'utf8');
   const changelog = await readFile(new URL('../../../CHANGELOG.md', import.meta.url), 'utf8');
-  const publishWorkflow = await readFile(new URL('../../../.github/workflows/npm-publish-github-packages.yml', import.meta.url), 'utf8');
+  const releaseWorkflow = await readFile(new URL('../../../.github/workflows/release-verification.yml', import.meta.url), 'utf8');
   const envExample = await readFile(new URL('../../../.env.example', import.meta.url), 'utf8');
   const readme = await readFile(new URL('../../../README.md', import.meta.url), 'utf8');
   const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
@@ -5279,12 +5279,16 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   assert.match(compose, /CRMY_ADMIN_PASSWORD: \$\{CRMY_ADMIN_PASSWORD:\?Set a unique 12\+ character admin password before first boot\}/);
   assert.ok(rootPackage.indexOf('npm run build --workspace=packages/web') < rootPackage.indexOf('npm run build --workspace=packages/server'));
 
-  assert.match(publishWorkflow, /npm run lint/);
-  assert.match(publishWorkflow, /npm run build/);
-  assert.match(publishWorkflow, /npm run test:cli-coverage/);
-  assert.match(publishWorkflow, /npm audit --audit-level=moderate --omit=dev/);
+  assert.match(releaseWorkflow, /release:\s*[\s\S]*types: \[created\]/);
+  assert.match(releaseWorkflow, /workflow_dispatch:/);
+  assert.match(releaseWorkflow, /node-version: 24/);
+  assert.match(releaseWorkflow, /npm run lint/);
+  assert.match(releaseWorkflow, /npm run build/);
+  assert.match(releaseWorkflow, /npm test/);
+  assert.match(releaseWorkflow, /npm run test:cli-coverage/);
+  assert.match(releaseWorkflow, /npm audit --audit-level=moderate --omit=dev/);
   for (const workspace of ['packages/shared', 'packages/server', 'packages/cli', 'packages/web', 'packages/openclaw-plugin']) {
-    assert.match(publishWorkflow, new RegExp(`npm publish --workspace=${workspace}`));
+    assert.doesNotMatch(releaseWorkflow, new RegExp(`npm publish --workspace=${workspace}`));
   }
 
   assert.match(envExample, /CRMY_ENCRYPTION_KEY=/);
